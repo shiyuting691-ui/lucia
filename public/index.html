@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>极致Essay · 智能方案生成器</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --navy:#0D1B3E;--gold:#C9A84C;
+  --accent:#2563EB;--accentL:#EFF6FF;--accentM:#BFDBFE;
+  --green:#059669;--greenL:#ECFDF5;--greenM:#A7F3D0;
+  --amber:#D97706;--amberL:#FFFBEB;
+  --red:#DC2626;--redL:#FEF2F2;--redM:#FECACA;
+  --purple:#7C3AED;--purpleL:#F5F3FF;--purpleM:#DDD6FE;
+  --ai:#0891B2;--aiL:#ECFEFF;--aiM:#A5F3FC;
+  --text:#111827;--muted:#6B7280;--border:#E5E7EB;--bg:#F8F9FC;--white:#fff;
+}
+body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+/* HEADER */
+.hdr{background:var(--navy);padding:16px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;box-shadow:0 2px 12px rgba(0,0,0,.25)}
+.logo{font-family:'DM Serif Display',serif;font-size:18px;color:#fff}
+.logo em{color:var(--gold);font-style:normal}
+.logo-s{font-size:10px;color:rgba(255,255,255,.4);margin-top:1px}
+.hdr-right{display:flex;align-items:center;gap:8px}
+.badge{background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.3);color:var(--gold);font-size:10px;padding:3px 10px;border-radius:20px}
+.key-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.7);font-size:11px;padding:4px 10px;border-radius:7px;cursor:pointer;font-family:'Noto Sans SC',sans-serif}
+.key-btn:hover{background:rgba(255,255,255,.15)}
+.key-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
+.key-dot.ok{background:#34D399}
+.key-dot.no{background:#F87171}
+
+/* API KEY MODAL */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center}
+.modal-bg.on{display:flex}
+.modal{background:#fff;border-radius:16px;padding:28px;width:460px;max-width:90vw}
+.modal-title{font-size:16px;font-weight:700;color:var(--navy);margin-bottom:6px}
+.modal-sub{font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6}
+.modal input{width:100%;padding:10px 13px;border:1.5px solid var(--border);border-radius:9px;font-size:13px;font-family:monospace;color:var(--text);outline:none;margin-bottom:12px}
+.modal input:focus{border-color:var(--accent)}
+.modal-btns{display:flex;gap:8px}
+.modal-save{flex:1;padding:10px;background:var(--navy);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Noto Sans SC',sans-serif}
+.modal-save:hover{background:#1a3268}
+.modal-cancel{padding:10px 16px;background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:9px;font-size:13px;cursor:pointer;font-family:'Noto Sans SC',sans-serif}
+.modal-tip{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.6;padding:8px 10px;background:var(--accentL);border-radius:7px}
+
+.wrap{max-width:700px;margin:22px auto;padding:0 16px 60px}
+
+/* TABS */
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);background:var(--white);border-radius:12px;padding:4px;box-shadow:0 1px 3px rgba(0,0,0,.07);margin-bottom:14px}
+.tab{padding:9px 6px;border:none;background:transparent;border-radius:8px;cursor:pointer;font-size:11px;font-weight:500;color:var(--muted);font-family:'Noto Sans SC',sans-serif;transition:all .16s;display:flex;align-items:center;justify-content:center;gap:4px}
+.tab.on-ai{background:var(--aiL);color:var(--ai)}
+.tab.on-form{background:var(--accentL);color:var(--accent)}
+.tab.on-wx{background:#FFF7ED;color:#EA580C}
+.tab.on-qk{background:var(--purpleL);color:var(--purple)}
+
+/* CARD */
+.card{background:var(--white);border-radius:13px;padding:22px;box-shadow:0 1px 3px rgba(0,0,0,.06),0 4px 14px rgba(0,0,0,.04);margin-bottom:12px}
+
+/* SECTION */
+.sh{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin:16px 0 9px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.sh:first-child{margin-top:0}
+
+/* FORM */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg.sp{grid-column:1/-1}
+label{font-size:11px;font-weight:600;color:var(--muted)}
+label .opt{font-weight:400;color:#9CA3AF;font-size:10px}
+input,select,textarea{padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:'Noto Sans SC',sans-serif;color:var(--text);outline:none;transition:border-color .16s;background:var(--white);width:100%}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.07)}
+textarea{resize:vertical;line-height:1.65}
+
+/* AI FIELDS */
+.aif{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.aif label{font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:baseline;gap:6px}
+.aif input,.aif textarea{border-color:var(--aiM)}
+.aif input:focus,.aif textarea:focus{border-color:var(--ai);box-shadow:0 0 0 3px rgba(8,145,178,.07)}
+.ai-tip{background:var(--aiL);border:1px solid var(--aiM);border-radius:9px;padding:10px 13px;font-size:12px;color:var(--ai);line-height:1.6;margin-bottom:13px}
+
+/* CHIPS */
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:4px 10px;border:1.5px solid var(--border);border-radius:20px;font-size:11px;color:var(--muted);cursor:pointer;transition:all .13s;user-select:none;background:var(--white)}
+.chip:hover{border-color:var(--accent);color:var(--accent);background:var(--accentL)}
+.chip.c-r{border-color:var(--red);color:var(--red);background:var(--redL);font-weight:500}
+.chip.c-g{border-color:var(--green);color:var(--green);background:var(--greenL);font-weight:500}
+.chip.c-a{border-color:var(--amber);color:var(--amber);background:var(--amberL);font-weight:500}
+.chip.c-p{border-color:var(--purple);color:var(--purple);background:var(--purpleL);font-weight:500}
+
+/* COURSE ROWS */
+.crows{display:flex;flex-direction:column;gap:7px;margin-bottom:7px}
+.crow{background:var(--bg);border-radius:9px;padding:10px;border:1.5px solid var(--border);position:relative}
+.cg1{display:grid;grid-template-columns:2fr 1fr 1fr;gap:7px;margin-bottom:7px}
+.cg2{display:grid;grid-template-columns:1fr auto;gap:7px;align-items:start}
+.cl{font-size:10px;font-weight:700;color:var(--muted);margin-bottom:2px}
+.ci{padding:6px 9px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;font-family:'Noto Sans SC',sans-serif;color:var(--text);outline:none;width:100%;background:var(--white)}
+.ci:focus{border-color:var(--accent)}
+.crm{position:absolute;top:7px;right:7px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 5px;border-radius:3px}
+.crm:hover{background:var(--redL);color:var(--red)}
+.pcs{display:flex;gap:4px;flex-wrap:wrap}
+.pc{padding:3px 7px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;border:1.5px solid transparent;transition:all .12s}
+.pc-r{background:#FEF2F2;color:#DC2626;border-color:#FECACA}
+.pc-y{background:#FFFBEB;color:#D97706;border-color:#FDE68A}
+.pc-g{background:#ECFDF5;color:#059669;border-color:#A7F3D0}
+.pc-b{background:#EFF6FF;color:#2563EB;border-color:#BFDBFE}
+.pc.on{box-shadow:0 0 0 2px currentColor}
+.add-row{width:100%;padding:7px;border:1.5px dashed var(--border);border-radius:8px;background:transparent;color:var(--muted);font-size:12px;cursor:pointer;font-family:'Noto Sans SC',sans-serif;transition:all .13s}
+.add-row:hover{border-color:var(--accent);color:var(--accent);background:var(--accentL)}
+
+/* QUICK/WECHAT */
+.qi{width:100%;padding:12px;border:2px solid var(--purpleM);border-radius:10px;font-size:13px;font-family:'Noto Sans SC',sans-serif;color:var(--text);outline:none;resize:none;min-height:75px;line-height:1.65;transition:border-color .16s;margin-bottom:10px}
+.qi:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(124,58,237,.07)}
+.wa{width:100%;min-height:120px;padding:11px;border:2px solid #FED7AA;border-radius:10px;font-size:13px;font-family:'Noto Sans SC',sans-serif;color:var(--text);outline:none;resize:vertical;line-height:1.7;transition:border-color .16s}
+.wa:focus{border-color:#EA580C;box-shadow:0 0 0 3px rgba(234,88,12,.07)}
+.qexs{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+.qex{padding:4px 9px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--muted);cursor:pointer;transition:all .12s}
+.qex:hover{background:var(--purpleL);border-color:var(--purpleM);color:var(--purple)}
+
+/* HERO */
+.hero{text-align:center;padding:4px 0 16px}
+.hero-b{display:inline-flex;align-items:center;gap:4px;border:1px solid;font-size:10px;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.05em;margin-bottom:8px}
+.hero-b.ai{background:var(--aiL);border-color:var(--aiM);color:var(--ai)}
+.hero-b.qk{background:var(--purpleL);border-color:var(--purpleM);color:var(--purple)}
+.hero-t{font-family:'DM Serif Display',serif;font-size:19px;color:var(--navy);margin-bottom:4px}
+.hero-s{font-size:12px;color:var(--muted);line-height:1.6}
+
+/* BUTTONS */
+.btn{width:100%;padding:12px;border:none;border-radius:10px;font-size:13px;font-weight:600;font-family:'Noto Sans SC',sans-serif;cursor:pointer;transition:all .16s;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:6px}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none!important}
+.btn-ai{background:linear-gradient(135deg,#0891B2,#0E7490);color:#fff}
+.btn-ai:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(8,145,178,.28)}
+.btn-form{background:var(--navy);color:#fff}
+.btn-form:hover:not(:disabled){background:#1a3268;transform:translateY(-1px);box-shadow:0 4px 12px rgba(13,27,62,.22)}
+.btn-wx{background:linear-gradient(135deg,#EA580C,#C2410C);color:#fff}
+.btn-wx:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(234,88,12,.25)}
+.btn-qk{background:linear-gradient(135deg,#7C3AED,#5B21B6);color:#fff}
+.btn-qk:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(124,58,237,.28)}
+
+/* LOADING */
+.loading{display:none;text-align:center;padding:36px 20px}
+.loading.on{display:block}
+.dots{display:inline-flex;gap:7px;margin-bottom:11px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--navy);animation:pulse 1.4s ease-in-out infinite}
+.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
+@keyframes pulse{0%,80%,100%{transform:scale(.5);opacity:.3}40%{transform:scale(1);opacity:1}}
+.lt{font-size:13px;color:var(--muted)}.ls{font-size:11px;color:var(--muted);margin-top:3px}
+
+/* RESULT */
+.result{display:none}
+.result.on{display:block}
+.rh{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:7px}
+.rt{font-size:13px;font-weight:600;color:var(--navy)}
+.rac{display:flex;gap:5px;flex-wrap:wrap}
+.bsm{padding:6px 11px;border-radius:7px;font-size:11px;font-weight:500;cursor:pointer;font-family:'Noto Sans SC',sans-serif;transition:all .13s;border:none;display:flex;align-items:center;gap:4px}
+.b-open{background:var(--navy);color:#fff}.b-open:hover{background:#1a3268}
+.b-copy{background:var(--accentL);color:var(--accent);border:1px solid var(--accentM)}.b-copy:hover{background:var(--accentM)}
+.b-reset{background:var(--bg);color:var(--muted);border:1px solid var(--border)}.b-reset:hover{background:var(--border)}
+.pdf-hint{font-size:10px;color:var(--muted);margin-bottom:8px}
+#pf{width:100%;border:1px solid var(--border);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.05);min-height:480px}
+
+/* CHAT */
+.chatbox{margin-top:0}
+.chat-title{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px;display:flex;align-items:center;gap:6px}
+.chat-presets{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:7px}
+.cp{padding:4px 9px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--muted);cursor:pointer;transition:all .12s}
+.cp:hover{background:var(--accentL);border-color:var(--accentM);color:var(--accent)}
+.chat-msgs{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;max-height:180px;overflow-y:auto}
+.cmsg{padding:8px 11px;border-radius:9px;font-size:12px;line-height:1.5;max-width:85%}
+.cmsg.user{background:var(--navy);color:#fff;align-self:flex-end;border-radius:9px 9px 2px 9px}
+.cmsg.ai{background:var(--bg);color:var(--text);align-self:flex-start;border:1px solid var(--border);border-radius:9px 9px 9px 2px}
+.chat-row{display:flex;gap:7px}
+.chat-in{flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:13px;font-family:'Noto Sans SC',sans-serif;outline:none}
+.chat-in:focus{border-color:var(--accent)}
+.chat-go{padding:9px 14px;background:var(--accent);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Noto Sans SC',sans-serif;white-space:nowrap}
+.chat-go:hover{background:#1d4ed8}
+.chat-go:disabled{opacity:.5;cursor:not-allowed}
+
+/* TACTICS */
+.tac-panel{display:none;margin-top:0}
+.tac-panel.on{display:block}
+.tac-scenes{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+.ts{padding:5px 11px;border:1.5px solid var(--border);border-radius:20px;font-size:11px;color:var(--muted);cursor:pointer;transition:all .13s;background:var(--white)}
+.ts.on{border-color:var(--gold);color:var(--amber);background:var(--amberL);font-weight:600}
+.ts:hover:not(.on){border-color:var(--accent);color:var(--accent);background:var(--accentL)}
+.tac-body{display:none}
+.tac-body.on{display:block}
+.tac-sec{margin-bottom:11px}
+.tac-lbl{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}
+.tac-txt{font-size:13px;color:var(--text);line-height:1.6;background:var(--bg);border-radius:8px;padding:10px 12px;border-left:3px solid var(--accent)}
+.tac-list{display:flex;flex-direction:column;gap:5px}
+.tac-item{font-size:12px;color:var(--text);line-height:1.5;padding:7px 11px;background:var(--bg);border-radius:7px;display:flex;align-items:flex-start;gap:6px}
+.tac-item::before{content:'✦';color:var(--accent);font-size:10px;flex-shrink:0;margin-top:2px}
+.tac-qa{display:flex;flex-direction:column;gap:6px}
+.tac-q{font-size:12px;font-weight:600;color:var(--red);background:var(--redL);padding:7px 11px;border-radius:7px 7px 0 0}
+.tac-a{font-size:12px;color:var(--text);background:var(--greenL);padding:7px 11px;border-radius:0 0 7px 7px;line-height:1.5;border-top:1px solid var(--greenM)}
+
+/* ERR */
+.errbox{display:none;background:var(--redL);border:1px solid var(--redM);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+.errbox.on{display:block}
+.errbox p{font-size:12px;color:var(--red);line-height:1.5}
+.errbox button{margin-top:7px;padding:5px 12px;background:var(--red);color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-family:'Noto Sans SC',sans-serif}
+
+/* HISTORY SIDEBAR */
+.sidebar{position:fixed;right:0;top:53px;bottom:0;width:240px;background:var(--white);border-left:1px solid var(--border);padding:14px;overflow-y:auto;transform:translateX(100%);transition:transform .2s;z-index:100;box-shadow:-4px 0 16px rgba(0,0,0,.08)}
+.sidebar.open{transform:translateX(0)}
+.sb-title{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;margin-bottom:8px}
+.sb-new{width:100%;padding:8px;background:var(--navy);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Noto Sans SC',sans-serif;margin-bottom:8px}
+.sb-new:hover{background:#1a3268}
+.sb-list{display:flex;flex-direction:column;gap:4px}
+.sb-item{padding:8px 10px;border-radius:8px;cursor:pointer;border:1.5px solid transparent;transition:all .13s}
+.sb-item:hover{background:var(--bg)}
+.sb-item.active{background:var(--accentL);border-color:var(--accentM)}
+.sb-name{font-size:11px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-meta{font-size:10px;color:var(--muted);margin-top:2px}
+.sb-empty{font-size:12px;color:var(--muted);text-align:center;padding:16px 0}
+
+@media(max-width:540px){
+  .hdr{padding:12px 14px}
+  .wrap{padding:0 10px 40px;margin-top:14px}
+  .card{padding:16px}
+  .tabs{grid-template-columns:1fr 1fr}
+  .g2{grid-template-columns:1fr}
+  .cg1{grid-template-columns:1fr}
+  .fg.sp{grid-column:1}
+}
+</style>
+</head>
+<body>
+
+<!-- API KEY MODAL -->
+<div class="modal-bg" id="key-modal">
+  <div class="modal">
+    <div class="modal-title">🔑 配置 API Key</div>
+    <div class="modal-sub">输入你的 Anthropic API Key，保存在本地浏览器，不会上传到任何服务器。</div>
+    <input type="password" id="key-input" placeholder="sk-ant-api03-...">
+    <div class="modal-btns">
+      <button class="modal-save" onclick="saveKey()">保存</button>
+      <button class="modal-cancel" onclick="closeKeyModal()">取消</button>
+    </div>
+    <div class="modal-tip">💡 Key保存在你的浏览器本地（localStorage），不会被发送到任何第三方服务器。可在 console.anthropic.com 创建。</div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div>
+    <div class="logo">极致<em>Essay</em></div>
+    <div class="logo-s">大客户服务部 · 智能方案生成器</div>
+  </div>
+  <div class="hdr-right">
+    <button class="key-btn" onclick="openKeyModal()" id="key-status">
+      <span class="key-dot no" id="key-dot"></span>未配置Key
+    </button>
+    <button class="key-btn" onclick="toggleSidebar()">📂 历史</button>
+    <div class="badge">内部专用</div>
+  </div>
+</div>
+
+<!-- SIDEBAR -->
+<div class="sidebar" id="sidebar">
+  <div class="sb-title">历史方案</div>
+  <button class="sb-new" onclick="newSession()">＋ 新建</button>
+  <div class="sb-list" id="sb-list"><div class="sb-empty">暂无历史</div></div>
+</div>
+
+<div class="wrap">
+
+  <!-- TABS -->
+  <div class="tabs" id="tabs">
+    <button class="tab on-ai" onclick="sw('ai')" id="tab-ai">🤖 AI分析</button>
+    <button class="tab" onclick="sw('form')" id="tab-form">📋 填表</button>
+    <button class="tab" onclick="sw('wx')" id="tab-wx">💬 微信</button>
+    <button class="tab" onclick="sw('qk')" id="tab-qk">⚡ 极速</button>
+  </div>
+
+  <!-- AI分析模式 -->
+  <div id="mode-ai">
+    <div class="card">
+      <div class="hero">
+        <div class="hero-b ai">🤖 AI ANALYSIS</div>
+        <div class="hero-t">描述客户，AI来判断方案</div>
+        <div class="hero-s">用自然语言描述，AI分析画像、匹配产品、制定专属方案</div>
+      </div>
+      <div class="ai-tip">💡 每个框描述一个维度，越具体越精准。不知道的留空，AI合理推断。</div>
+      <div class="aif"><label>🏫 学校 · 专业 · 学历 <span class="opt">必填</span></label><input id="ai-school" placeholder="如：University of Manchester，MA Digital Media，硕士"></div>
+      <div class="aif"><label>📖 课程 · DDL · 类型 <span class="opt">必填，每门课一行</span></label><textarea id="ai-courses" rows="4" placeholder="Media and Society — 3000字Essay — 5月28日&#10;Research Methods — Report — 6月10日"></textarea></div>
+      <div class="aif"><label>🎯 目标成绩 <span class="opt">选填</span></label><input id="ai-target" placeholder="如：目标2:1 / GPA 3.0 / 只要不挂科"></div>
+      <div class="aif"><label>😰 客户最担心什么 <span class="opt">越真实越好</span></label><textarea id="ai-worry" rows="3" placeholder="如：三门DDL集中5月底，完全没开始，很焦虑&#10;或：之前被机构骗过，需要合同保障&#10;或：想申研，必须拿Distinction"></textarea></div>
+      <div class="g2" style="margin-bottom:12px">
+        <div class="aif" style="margin:0"><label>💰 预算 <span class="opt">选填</span></label><input id="ai-budget" placeholder="1-2万 / 5000左右"></div>
+        <div class="aif" style="margin:0"><label>📊 学习能力 <span class="opt">选填</span></label><input id="ai-ability" placeholder="英文好但拖延 / 语言是障碍"></div>
+      </div>
+      <div class="aif"><label>📝 其他补充 <span class="opt">选填</span></label><textarea id="ai-extra" rows="2" placeholder="家长决策 / 有补考 / 已有初稿 / 临近毕业论文..."></textarea></div>
+      <button class="btn btn-ai" onclick="generate('ai')">🤖 AI分析并生成方案</button>
+    </div>
+  </div>
+
+  <!-- 填表模式 -->
+  <div id="mode-form" style="display:none">
+    <div class="card">
+      <div class="sh">📚 基本信息</div>
+      <div class="g2">
+        <div class="fg"><label>就读学校 <span class="opt">必填</span></label><input id="school" placeholder="University of Manchester"></div>
+        <div class="fg"><label>专业 <span class="opt">必填</span></label><input id="major" placeholder="MA Digital Media"></div>
+        <div class="fg"><label>学历</label><select id="level"><option value="硕士">硕士</option><option value="本科">本科</option><option value="博士">博士</option></select></div>
+        <div class="fg"><label>目标成绩</label><input id="tgt" placeholder="2:1 / 70+ / Merit"></div>
+      </div>
+      <div class="sh">📖 课程信息</div>
+      <div class="crows" id="crows">
+        <div class="crow">
+          <button class="crm" onclick="rmC(this)">×</button>
+          <div class="cg1">
+            <div><div class="cl">课程名称</div><input class="ci" name="cn" placeholder="Media and Society"></div>
+            <div><div class="cl">类型</div><input class="ci" name="ct" placeholder="Essay/Exam"></div>
+            <div><div class="cl">DDL</div><input class="ci" name="cd" placeholder="5月28日"></div>
+          </div>
+          <div class="cg2">
+            <div><div class="cl">字数/要求</div><input class="ci" name="cr" placeholder="3000字"></div>
+            <div><div class="cl">优先级</div>
+              <div class="pcs"><span class="pc pc-r" onclick="pri(this,'🔴必保课')">🔴必保</span><span class="pc pc-y on" onclick="pri(this,'🟡重点课')">🟡重点</span><span class="pc pc-g" onclick="pri(this,'🟢稳分课')">🟢稳分</span><span class="pc pc-b" onclick="pri(this,'🔵拉分课')">🔵拉分</span></div>
+              <input type="hidden" name="cp" value="🟡重点课">
+            </div>
+          </div>
+        </div>
+      </div>
+      <button class="add-row" onclick="addC()">＋ 添加课程</button>
+      <div class="sh">👤 客户画像</div>
+      <div class="g2">
+        <div class="fg"><label>当前进度</label><select id="prog"><option value="完全没有开始">完全没开始</option><option value="有思路未动笔">有思路未动笔</option><option value="已有初稿需提升">有初稿需提升</option><option value="只需润色把关">只需润色把关</option></select></div>
+        <div class="fg"><label>学习能力</label><select id="abil"><option value="较强，英文流畅">较强·流畅</option><option value="中等，需要引导">中等·需引导</option><option value="较弱，需全程辅导">较弱·全程支持</option><option value="语言是主要障碍">语言是主要障碍</option></select></div>
+        <div class="fg"><label>预算</label><input id="budget" placeholder="1-2万 / 5000左右"></div>
+        <div class="fg"><label>推荐产品 <span class="opt">留空AI判断</span></label><select id="prod"><option value="">AI自动推荐</option><option value="DP卓越安心包">DP卓越安心包</option><option value="DP安心包">DP安心包</option><option value="学年包">学年包</option><option value="保分润色方案">保分润色</option><option value="毕业无忧">毕业无忧</option><option value="单学期提分计划">单学期提分</option></select></div>
+      </div>
+      <div class="sh">⚡ 痛点 <span style="font-weight:400;text-transform:none;font-size:10px">可多选</span></div>
+      <div class="chips" id="pchips">
+        <div class="chip" onclick="tc(this,'r')">😰 怕挂科</div>
+        <div class="chip" onclick="tc(this,'p')">🎯 冲高分/申研</div>
+        <div class="chip" onclick="tc(this,'a')">📅 多门DDL并发</div>
+        <div class="chip" onclick="tc(this,'a')">⏰ 时间不够</div>
+        <div class="chip" onclick="tc(this,'r')">😤 被同行骗过</div>
+        <div class="chip" onclick="tc(this,'g')">📝 有初稿需提升</div>
+        <div class="chip" onclick="tc(this,'p')">🎓 临近毕业</div>
+        <div class="chip" onclick="tc(this,'a')">📉 GPA被拖累</div>
+        <div class="chip" onclick="tc(this,'r')">👪 家长参与决策</div>
+        <div class="chip" onclick="tc(this,'a')">🔄 有补考/重修</div>
+      </div>
+      <div class="sh">💬 补充</div>
+      <textarea id="notes" rows="2" placeholder="其他AI需要知道的信息..."></textarea>
+      <button class="btn btn-form" onclick="generate('form')">📋 生成定制方案</button>
+    </div>
+  </div>
+
+  <!-- 微信模式 -->
+  <div id="mode-wx" style="display:none">
+    <div class="card">
+      <div class="sh">粘贴微信聊天记录</div>
+      <textarea class="wa" id="wx-in" placeholder="直接把和客户的微信聊天记录粘贴进来...&#10;AI自动提取信息，分析画像，生成定制方案。"></textarea>
+      <div style="font-size:11px;color:var(--muted);margin:6px 0 10px">💡 聊天记录越完整越精准</div>
+      <button class="btn btn-wx" onclick="generate('wechat')">💬 从聊天记录生成方案</button>
+    </div>
+  </div>
+
+  <!-- 极速模式 -->
+  <div id="mode-qk" style="display:none">
+    <div class="card">
+      <div class="hero">
+        <div class="hero-b qk">⚡ TURBO</div>
+        <div class="hero-t">一句话，出方案</div>
+        <div class="hero-s">快速描述，AI自动推断生成完整方案</div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">💡 点击示例：</div>
+      <div class="qexs">
+        <div class="qex" onclick="fq('曼大传媒硕士，三门课5月底DDL，目标2:1，预算一两万，没开始很焦虑')">曼大传媒·急</div>
+        <div class="qex" onclick="fq('KCL金融硕士，dissertation+两门考试，目标distinction，预算3万')">KCL·高目标</div>
+        <div class="qex" onclick="fq('Leeds商科大三，四门课没开始DDL集中六月，预算5000')">Leeds·多课</div>
+        <div class="qex" onclick="fq('香港树仁大学商科，GPA 2.5目标3.0，六门课，财会经济统计')">树仁·GPA提升</div>
+      </div>
+      <textarea class="qi" id="qi" placeholder="如：曼大传媒硕士，三门课5月底DDL，目标2:1，预算一两万，还没开始"></textarea>
+      <button class="btn btn-qk" onclick="generate('quick')">⚡ 立刻生成方案</button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div class="loading card" id="loading">
+    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    <div class="lt" id="lt">正在生成方案...</div>
+    <div class="ls" id="ls">分析客户画像中</div>
+  </div>
+
+  <!-- Error -->
+  <div class="errbox" id="err">
+    <p id="err-msg"></p>
+    <button onclick="backToForm()">← 返回修改</button>
+  </div>
+
+  <!-- Result -->
+  <div class="result" id="result">
+    <div class="card">
+      <div class="rh">
+        <div class="rt">✅ 方案生成完成</div>
+        <div class="rac">
+          <button class="bsm b-open" onclick="openNew()">🔗 新窗口/打印PDF</button>
+          <button class="bsm b-copy" id="copy-btn" onclick="copyHTML()">📋 复制HTML</button>
+          <button class="bsm b-reset" onclick="backToForm()">↩ 重新生成</button>
+        </div>
+      </div>
+      <div class="pdf-hint">点"新窗口"后按 Ctrl+P（Mac: ⌘+P）另存为PDF发给客户</div>
+      <iframe id="pf" frameborder="0" onload="resizeFrame(this)"></iframe>
+    </div>
+
+    <!-- 对话修改 -->
+    <div class="card chatbox">
+      <div class="chat-title">✏️ 修改方案</div>
+      <div class="chat-presets">
+        <div class="cp" onclick="fc('把报价降低，给出5000-8000的方案')">💰 调整报价</div>
+        <div class="cp" onclick="fc('客户预算只有3000，重新推荐更适合的产品')">🔄 重推产品</div>
+        <div class="cp" onclick="fc('加强保障模块，突出合同保障和退款条款')">🛡️ 强调保障</div>
+        <div class="cp" onclick="fc('客户其实是本科生，调整方案定位和推荐产品')">🎓 改学历</div>
+        <div class="cp" onclick="fc('整体精简，减少文字，突出关键数据和表格')">✂️ 精简内容</div>
+        <div class="cp" onclick="fc('加一个A/B两档对比报价')">📊 加对比档</div>
+      </div>
+      <div class="chat-msgs" id="chat-msgs"></div>
+      <div class="chat-row">
+        <input class="chat-in" id="chat-in" placeholder="如：把课程目标分改成70+..." onkeydown="if(event.key==='Enter'){event.preventDefault();sendChat()}">
+        <button class="chat-go" id="chat-go" onclick="sendChat()">发送</button>
+      </div>
+    </div>
+
+    <!-- 话术助手 -->
+    <div class="card tac-panel" id="tac-panel">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px">💬 话术助手</div>
+      <div class="tac-scenes">
+        <div class="ts" onclick="getTac(this,'发方案时的开场白话术')">📤 发方案开场</div>
+        <div class="ts" onclick="getTac(this,'客户说太贵了的应对话术')">💸 客户嫌贵</div>
+        <div class="ts" onclick="getTac(this,'客户说要再想想的跟进话术')">🤔 客户犹豫</div>
+        <div class="ts" onclick="getTac(this,'和其他机构比有什么优势的话术')">⚔️ 竞品对比</div>
+        <div class="ts" onclick="getTac(this,'促成成交的催单话术')">🎯 促成成交</div>
+        <div class="ts" onclick="getTac(this,'家长参与决策时的沟通话术')">👪 家长沟通</div>
+      </div>
+      <div id="tac-loading" style="display:none;text-align:center;padding:14px;font-size:13px;color:var(--muted)">生成话术中...</div>
+      <div class="tac-body" id="tac-body"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── 状态 ──
+let curTab = 'ai', curHTML = '', curMode = '', curData = {}, chatHist = [];
+const steps = ['分析客户画像中','匹配最优产品中','生成定制内容中','优化可视化排版中','即将完成...'];
+let si = 0, stTimer = null;
+
+// ── API Key 管理 ──
+function getKey() { return localStorage.getItem('jizhi_api_key') || ''; }
+function saveKey() {
+  const v = document.getElementById('key-input').value.trim();
+  if (!v.startsWith('sk-ant-')) { alert('Key格式不对，应以 sk-ant- 开头'); return; }
+  localStorage.setItem('jizhi_api_key', v);
+  closeKeyModal();
+  updateKeyStatus();
+}
+function openKeyModal() {
+  document.getElementById('key-input').value = getKey();
+  document.getElementById('key-modal').className = 'modal-bg on';
+}
+function closeKeyModal() { document.getElementById('key-modal').className = 'modal-bg'; }
+function updateKeyStatus() {
+  const k = getKey();
+  const dot = document.getElementById('key-dot');
+  const btn = document.getElementById('key-status');
+  if (k) {
+    dot.className = 'key-dot ok';
+    btn.innerHTML = '<span class="key-dot ok"></span>Key已配置';
+  } else {
+    dot.className = 'key-dot no';
+    btn.innerHTML = '<span class="key-dot no"></span>配置Key';
+  }
+}
+
+// ── Tab切换 ──
+function sw(t) {
+  curTab = t;
+  ['ai','form','wx','qk'].forEach(x => {
+    document.getElementById('mode-'+x).style.display = x===t?'block':'none';
+    document.getElementById('tab-'+x).className = 'tab'+(x===t?' on-'+x:'');
+  });
+}
+function hideTabs() {
+  document.getElementById('tabs').style.display = 'none';
+  ['ai','form','wx','qk'].forEach(t => document.getElementById('mode-'+t).style.display='none');
+}
+function showTabs() {
+  document.getElementById('tabs').style.display = 'grid';
+  document.getElementById('mode-'+curTab).style.display = 'block';
+}
+
+// ── 痛点标签 ──
+function tc(el, c) {
+  const map = {r:'c-r',g:'c-g',a:'c-a',p:'c-p'};
+  const cls = map[c]||'c-r';
+  const on = Object.values(map).some(v => el.classList.contains(v));
+  el.classList.remove(...Object.values(map));
+  if (!on) el.classList.add(cls);
+}
+
+// ── 课程行 ──
+function pri(el, val) {
+  el.closest('.crow').querySelectorAll('.pc').forEach(p => p.classList.remove('on'));
+  el.classList.add('on');
+  el.closest('.crow').querySelector('[name=cp]').value = val;
+}
+function addC() {
+  const d = document.createElement('div');
+  d.className = 'crow';
+  d.innerHTML = `<button class="crm" onclick="rmC(this)">×</button>
+    <div class="cg1">
+      <div><div class="cl">课程名称</div><input class="ci" name="cn" placeholder="Research Methods"></div>
+      <div><div class="cl">类型</div><input class="ci" name="ct" placeholder="Essay/Exam"></div>
+      <div><div class="cl">DDL</div><input class="ci" name="cd" placeholder="6月10日"></div>
+    </div>
+    <div class="cg2">
+      <div><div class="cl">字数/要求</div><input class="ci" name="cr" placeholder="2500字"></div>
+      <div><div class="cl">优先级</div>
+        <div class="pcs"><span class="pc pc-r" onclick="pri(this,'🔴必保课')">🔴必保</span><span class="pc pc-y on" onclick="pri(this,'🟡重点课')">🟡重点</span><span class="pc pc-g" onclick="pri(this,'🟢稳分课')">🟢稳分</span><span class="pc pc-b" onclick="pri(this,'🔵拉分课')">🔵拉分</span></div>
+        <input type="hidden" name="cp" value="🟡重点课">
+      </div>
+    </div>`;
+  document.getElementById('crows').appendChild(d);
+}
+function rmC(btn) {
+  if (document.querySelectorAll('.crow').length <= 1) return;
+  btn.closest('.crow').remove();
+}
+
+// ── 收集表单 ──
+function collectForm() {
+  const courses = [];
+  document.querySelectorAll('.crow').forEach(r => {
+    const n = r.querySelector('[name=cn]').value.trim();
+    if (!n) return;
+    courses.push({ name:n, type:r.querySelector('[name=ct]').value.trim(), ddl:r.querySelector('[name=cd]').value.trim(), req:r.querySelector('[name=cr]').value.trim(), priority:r.querySelector('[name=cp]').value });
+  });
+  const pains = [];
+  document.querySelectorAll('#pchips .chip').forEach(c => {
+    if (['c-r','c-g','c-a','c-p'].some(cls => c.classList.contains(cls))) pains.push(c.textContent.trim());
+  });
+  return { school:document.getElementById('school').value.trim(), major:document.getElementById('major').value.trim(), level:document.getElementById('level').value, targetScore:document.getElementById('tgt').value.trim(), courses, progress:document.getElementById('prog').value, ability:document.getElementById('abil').value, budget:document.getElementById('budget').value.trim(), product:document.getElementById('prod').value, painPoints:pains.join('、'), notes:document.getElementById('notes').value.trim() };
+}
+function fq(t) { document.getElementById('qi').value = t; }
+
+// ── Loading ──
+function showLoading(text) {
+  si = 0;
+  document.getElementById('lt').textContent = text || '正在生成...';
+  document.getElementById('ls').textContent = steps[0];
+  document.getElementById('loading').className = 'loading card on';
+  stTimer = setInterval(() => { si=(si+1)%steps.length; document.getElementById('ls').textContent=steps[si]; }, 2000);
+}
+function hideLoading() { if(stTimer) clearInterval(stTimer); document.getElementById('loading').className = 'loading card'; }
+function showErr(msg) { document.getElementById('err-msg').textContent = msg; document.getElementById('err').className = 'errbox on'; }
+function hideErr() { document.getElementById('err').className = 'errbox'; }
+
+// ── 直接调用 Anthropic API ──
+async function callAI(systemPrompt, userPrompt, maxTokens) {
+  const key = getKey();
+  if (!key) {
+    openKeyModal();
+    throw new Error('请先配置API Key');
+  }
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5',
+      max_tokens: maxTokens || 8000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+  });
+  if (!resp.ok) {
+    const t = await resp.text();
+    let msg = 'API错误 ' + resp.status;
+    try { const j = JSON.parse(t); msg = j.error?.message || msg; } catch(e) {}
+    throw new Error(msg);
+  }
+  const j = await resp.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.content[0].text;
+}
+
+function buildUserPrompt(mode, data) {
+  if (mode === 'ai') return '请分析客户信息并生成方案：\n学校专业学历：'+(data.school||'未填')+'\n课程DDL类型：\n'+(data.courses||'未填')+'\n目标成绩：'+(data.target||'未填')+'\n客户最担心：'+(data.worry||'未填')+'\n预算：'+(data.budget||'未填')+'\n学习能力：'+(data.ability||'未填')+'\n其他：'+(data.extra||'无');
+  if (mode === 'quick') return '客户情况：'+(data.quickInput||'')+'\n不完整处合理推断，注明待确认。';
+  if (mode === 'wechat') return '以下是销售与客户微信聊天记录，提取信息生成方案：\n\n'+(data.wechatText||'');
+  let p = '客户信息：\n学校：'+(data.school||'')+' 专业：'+(data.major||'')+' 学历：'+(data.level||'硕士')+' 目标：'+(data.targetScore||'未填')+'\n';
+  const cs = data.courses||[];
+  if (cs.length) { p+='课程：\n'; cs.forEach((c,i)=>{ p+=(i+1)+'. '+(c.name||'')+' '+(c.type||'')+' DDL:'+(c.ddl||'')+' '+(c.priority||'')+'\n'; }); }
+  p+='进度：'+(data.progress||'')+' 能力：'+(data.ability||'')+' 预算：'+(data.budget||'未填')+'\n痛点：'+(data.painPoints||'未填')+' 备注：'+(data.notes||'无');
+  return p;
+}
+
+function getHtmlSys() {
+  return '你是极致Essay大客户服务部的资深方案专家，8年经验。根据客户信息生成专业、简洁、高度可视化的HTML学业支持方案。\n\n产品匹配：怕挂科/GPA临界→DP安心包；冲高分/申研→DP卓越安心包；多门课/DDL乱→学年包；有初稿→保分润色；临近毕业→毕业无忧；GPA提升→单学期提分；预算低→A/B两档。\n\n方案6个模块：\n1.封面：深色背景#0D1B3E白字，DM Serif Display大标题（学校·专业·方案），推荐产品标签，编制日期\n2.你的情况：4个横排stat卡片（白底品牌蓝左边框，数字28px）显示课程数/最近DDL/目标/预算，2-3句精准处境描述（关键词加粗，≤80字）\n3.核心风险：2-3个琥珀色卡片（#FFFBEB背景#D97706左边框），针对该校该专业具体风险，不写通用废话\n4.专属方案：推荐理由+课程支持表（table含hover，优先级彩色badge：红必保/黄重点/绿稳分/蓝拉分，辅导重点具体写）+服务内容grid两列\n5.执行节奏：横向时间轴，品牌蓝节点，按DDL排列≤5节点\n6.保障+报价：绿色保障卡片grid（合同约定退款/三道质检/换老师/Turnitin）+深色背景报价A/B两档+下一步4步横排流程\n\n设计：完整单文件HTML，CSS/JS内嵌，Google Fonts（Noto Sans SC+DM Serif Display+DM Sans），max-width:860px居中，圆角12px，轻阴影，左侧4px品牌蓝竖条，@media print，fadeUp动画。颜色：#0D1B3E #2563EB #059669 #D97706 #C9A84C。\n\n写作：具体写课程名DDL分数，合同约定代替保证，中文为主课程名/学校名保留英文，8年经验顾问语气。\n\n产品：DP安心包=全程辅导+合同约定分数未达退款+三道质检+Turnitin+换老师自由；DP卓越安心包=安心包全部+挂科双倍赔付72h+第一梯队写手；学年包=账户制+全科+余额跨学期+学业管家+VIP优先+挂科全额赔付；毕业无忧=顶级硕博+无限修改+配合导师；保分润色=方向校准+结构优化+分析补强+润色+终审；单学期提分=按优先级分课时+每周跟进+GPA提升0.3-0.5。\n\n只输出完整HTML，从<!DOCTYPE html>到</html>，不要任何其他文字。';
+}
+
+// ── 生成方案 ──
+async function generate(mode) {
+  let data = {}, label = '';
+  if (mode === 'ai') {
+    const s = document.getElementById('ai-school').value.trim();
+    const c = document.getElementById('ai-courses').value.trim();
+    if (!s || !c) { alert('请至少填写学校和课程信息'); return; }
+    data = { school:s, courses:c, target:document.getElementById('ai-target').value.trim(), worry:document.getElementById('ai-worry').value.trim(), budget:document.getElementById('ai-budget').value.trim(), ability:document.getElementById('ai-ability').value.trim(), extra:document.getElementById('ai-extra').value.trim() };
+    label = s + ' · AI分析';
+  } else if (mode === 'quick') {
+    const v = document.getElementById('qi').value.trim();
+    if (!v) { alert('请输入客户情况'); return; }
+    data = { quickInput:v }; label = v.slice(0,24)+'...';
+  } else if (mode === 'wechat') {
+    const v = document.getElementById('wx-in').value.trim();
+    if (!v) { alert('请粘贴微信聊天记录'); return; }
+    data = { wechatText:v }; label = '微信记录';
+  } else {
+    data = collectForm();
+    if (!data.school) { alert('请填写学校'); return; }
+    label = data.school+(data.major?' · '+data.major:'');
+  }
+  curMode = mode; curData = data;
+  hideTabs(); hideErr();
+  showLoading('正在生成方案...');
+  try {
+    let html = await callAI(getHtmlSys(), buildUserPrompt(mode, data), 8000);
+    html = html.trim().replace(/^```html\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/,'').trim();
+    if (!html.includes('<html') && !html.includes('<!DOCTYPE')) throw new Error('生成内容格式异常，请重试');
+    hideLoading();
+    showResult(html, mode, label);
+  } catch(e) {
+    hideLoading(); showTabs(); showErr('生成失败：'+e.message);
+  }
+}
+
+function showResult(html, mode, label) {
+  curHTML = html; chatHist = [];
+  document.getElementById('chat-msgs').innerHTML = '';
+  document.getElementById('pf').srcdoc = html;
+  hideErr();
+  document.getElementById('result').className = 'result on';
+  document.getElementById('tac-panel').className = 'card tac-panel on';
+  document.querySelectorAll('.ts').forEach(t=>t.classList.remove('on'));
+  document.getElementById('tac-body').className = 'tac-body';
+  saveLocal({ label, mode, html, time:new Date().toLocaleTimeString(), date:new Date().toLocaleDateString() });
+}
+
+// ── 对话修改 ──
+function fc(t) { document.getElementById('chat-in').value = t; document.getElementById('chat-in').focus(); }
+async function sendChat() {
+  const msg = document.getElementById('chat-in').value.trim();
+  if (!msg || !curHTML) return;
+  document.getElementById('chat-in').value = '';
+  const go = document.getElementById('chat-go');
+  go.disabled = true; go.textContent = '发送中...';
+  addMsg(msg, 'user');
+  try {
+    const sys = getHtmlSys();
+    const prompt = '销售要求：'+msg+'\n\n当前方案HTML（请修改后输出完整HTML）：\n'+curHTML.slice(0,5000);
+    let html = await callAI(sys, prompt, 8000);
+    html = html.trim().replace(/^```html\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/,'').trim();
+    if (html.includes('<html') || html.includes('<!DOCTYPE')) {
+      curHTML = html;
+      document.getElementById('pf').srcdoc = html;
+      addMsg('✅ 方案已更新', 'ai');
+      const list = loadLocal();
+      if (list.length) { list[0].html = html; localStorage.setItem('jizhi_hist', JSON.stringify(list)); }
+    } else {
+      addMsg('❌ 修改失败，请重试', 'ai');
+    }
+  } catch(e) { addMsg('❌ 失败：'+e.message, 'ai'); }
+  go.disabled = false; go.textContent = '发送';
+}
+function addMsg(t, role) {
+  const el = document.getElementById('chat-msgs');
+  const d = document.createElement('div');
+  d.className = 'cmsg '+role; d.textContent = t;
+  el.appendChild(d); el.scrollTop = el.scrollHeight;
+}
+
+// ── 话术助手 ──
+async function getTac(el, scenario) {
+  document.querySelectorAll('.ts').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById('tac-loading').style.display = 'block';
+  document.getElementById('tac-body').className = 'tac-body';
+  const clientInfo = curMode==='ai' ? '学校：'+curData.school+' 课程：'+curData.courses+' 担心：'+(curData.worry||'') : curMode==='quick' ? curData.quickInput : '学校：'+(curData.school||'')+'，专业：'+(curData.major||'');
+  const sys = '你是极致Essay资深销售顾问。只输出JSON，格式：{"title":"场景","opening":"开场白2-3句","keyPoints":["卖点1","卖点2","卖点3"],"objections":[{"q":"客户反对","a":"应对话术"}],"closing":"跟进催单1-2句"}';
+  try {
+    let t = await callAI(sys, '客户：'+clientInfo+'\n场景：'+scenario+'\n只输出JSON。', 1500);
+    t = t.trim().replace(/^```json\s*/i,'').replace(/\s*```$/,'').trim();
+    const j = JSON.parse(t);
+    document.getElementById('tac-loading').style.display = 'none';
+    document.getElementById('tac-body').className = 'tac-body on';
+    document.getElementById('tac-body').innerHTML = `
+      <div class="tac-sec"><div class="tac-lbl">📤 开场白</div><div class="tac-txt">${j.opening}</div></div>
+      <div class="tac-sec"><div class="tac-lbl">💡 核心卖点</div><div class="tac-list">${(j.keyPoints||[]).map(p=>'<div class="tac-item">'+p+'</div>').join('')}</div></div>
+      <div class="tac-sec"><div class="tac-lbl">🛡️ 应对反对意见</div><div class="tac-qa">${(j.objections||[]).map(o=>'<div><div class="tac-q">客户：'+o.q+'</div><div class="tac-a">你：'+o.a+'</div></div>').join('')}</div></div>
+      <div class="tac-sec"><div class="tac-lbl">🎯 跟进催单</div><div class="tac-txt">${j.closing}</div></div>`;
+  } catch(e) {
+    document.getElementById('tac-loading').style.display = 'none';
+    document.getElementById('tac-body').className = 'tac-body on';
+    document.getElementById('tac-body').innerHTML = '<div style="color:var(--red);font-size:12px;padding:8px">生成失败：'+e.message+'</div>';
+  }
+}
+
+// ── 工具 ──
+function resizeFrame(f) { try { f.style.height = Math.max(f.contentWindow.document.body.scrollHeight+24,480)+'px'; } catch(e) { f.style.height='560px'; } }
+function openNew() { if(!curHTML) return; window.open(URL.createObjectURL(new Blob([curHTML],{type:'text/html'})),'_blank'); }
+function copyHTML() {
+  if(!curHTML) return;
+  navigator.clipboard.writeText(curHTML).then(()=>{ const b=document.getElementById('copy-btn'); b.textContent='✅ 已复制'; setTimeout(()=>b.innerHTML='📋 复制HTML',2000); });
+}
+function backToForm() { document.getElementById('result').className='result'; document.getElementById('tac-panel').className='card tac-panel'; hideErr(); showTabs(); }
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+function newSession() { backToForm(); curHTML=''; curMode=''; curData={}; chatHist=[]; document.getElementById('sidebar').classList.remove('open'); }
+
+// ── 历史存储 ──
+const HIST_KEY = 'jizhi_hist';
+function saveLocal(item) { try { let a=loadLocal(); a.unshift(item); if(a.length>30) a=a.slice(0,30); localStorage.setItem(HIST_KEY,JSON.stringify(a)); renderSB(); } catch(e){} }
+function loadLocal() { try { return JSON.parse(localStorage.getItem(HIST_KEY)||'[]'); } catch(e) { return []; } }
+function renderSB() {
+  const list = loadLocal();
+  const el = document.getElementById('sb-list');
+  if (!list.length) { el.innerHTML='<div class="sb-empty">暂无历史</div>'; return; }
+  el.innerHTML = list.map((h,i)=>`<div class="sb-item" onclick="loadH(${i})"><div class="sb-name">${h.label}</div><div class="sb-meta">${h.time} · ${h.mode}</div></div>`).join('');
+}
+function loadH(i) { const h=loadLocal()[i]; if(!h) return; curHTML=h.html; document.getElementById('pf').srcdoc=h.html; document.getElementById('result').className='result on'; document.getElementById('tac-panel').className='card tac-panel on'; hideTabs(); document.getElementById('sidebar').classList.remove('open'); }
+
+// ── 初始化 ──
+sw('ai');
+updateKeyStatus();
+renderSB();
+if (!getKey()) setTimeout(openKeyModal, 800);
+</script>
+</body>
+</html>
