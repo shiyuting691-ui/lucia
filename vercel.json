@@ -1,1 +1,7 @@
 
+{
+  "rewrites": [
+    { "source": "/api/key", "destination": "/api/key.js" },
+    { "source": "/(.*)", "destination": "/public/index.html" }
+  ]
+}
