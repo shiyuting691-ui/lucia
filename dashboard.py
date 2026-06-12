@@ -388,15 +388,20 @@ with st.sidebar:
         "📝 内容池",
         "💼 销售作战台",
         "📁 资料上传中心",
-        "📚 公司资料学习中心",
-        "─────────────",
-        "📡 市场情报台",
-        "📅 营销日历",
-        "✅ 部门任务台",
-        "🗣️ 产品反馈台",
-        "🧭 战略建议台",
-        "🤖 自动化工作流",
     ], label_visibility="collapsed")
+    with st.expander("🧰 更多工具"):
+        _more = st.radio("", [
+            "（收起）",
+            "📚 公司资料学习中心",
+            "📡 市场情报台",
+            "📅 营销日历",
+            "✅ 部门任务台",
+            "🗣️ 产品反馈台",
+            "🧭 战略建议台",
+            "🤖 自动化工作流",
+        ], label_visibility="collapsed", key="more_tools")
+    if _more != "（收起）":
+        page = _more
     st.divider()
     st.caption("v4.0 · 增长作战系统")
 

@@ -29,6 +29,7 @@
   python main.py run-weekly-promotion [--week 2026-06-09] # 生成周度推广建议（销售+市场）
   python main.py run-daily-reminder [--date 2026-06-12]   # 生成每日有效提醒
 """
+import os
 import sys
 import yaml
 import json
@@ -702,7 +703,6 @@ def main():
     elif cmd == "scan-knowledge-base":
         """扫描 knowledge_base/ 目录，登记文件信息到 knowledge_docs 表，不调用 Claude"""
         from pathlib import Path as _Path
-        import os
 
         KB_DIR = _Path(__file__).parent / "knowledge_base"
         CATEGORY_MAP = {
@@ -806,7 +806,7 @@ def main():
 
     elif cmd == "init-demo":
         """一键演示初始化：导入样本数据→生成月度计划→生成任务→分析市场→推送企业微信"""
-        import subprocess, os
+        import subprocess
         env = os.environ.copy()
 
         def run_step(step_name, step_cmd):
@@ -868,8 +868,7 @@ def main():
             print("用法：python main.py ingest-teacher-capacity <file.csv>")
             sys.exit(1)
         import pandas as pd
-        from database import init_db, save_teacher_capacity
-        init_db(config)
+        from database import save_teacher_capacity
         df = pd.read_csv(args[1])
         saved = 0
         for _, row in df.iterrows():
@@ -986,9 +985,9 @@ def main():
 
         # 数据库连接 + 核心表
         try:
-            from database.db import init_db, engine
+            from database.db import init_db as _hc_init_db, engine
             from sqlalchemy import inspect as _inspect, text
-            init_db()
+            _hc_init_db()
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             insp = _inspect(engine)
