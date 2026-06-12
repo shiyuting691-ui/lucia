@@ -22,6 +22,9 @@ from .crud import (
     update_fact_content, get_active_facts_for_prompt, count_facts_by_type,
     save_dictionary_term, list_dictionary_terms, get_forbidden_terms,
     get_standard_terms_map, seed_default_dictionary,
+    # V7 学校增长情报
+    save_school_score, list_school_scores,
+    save_strategy_card, get_strategy_card, list_strategy_cards,
 )
 
 __all__ = [
@@ -48,4 +51,7 @@ __all__ = [
     "update_fact_content", "get_active_facts_for_prompt", "count_facts_by_type",
     "save_dictionary_term", "list_dictionary_terms", "get_forbidden_terms",
     "get_standard_terms_map", "seed_default_dictionary",
+    # V7 学校增长情报
+    "save_school_score", "list_school_scores",
+    "save_strategy_card", "get_strategy_card", "list_strategy_cards",
 ]

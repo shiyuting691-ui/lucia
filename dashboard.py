@@ -33,6 +33,9 @@ from database import (
     count_facts_by_type, save_company_fact,
     list_dictionary_terms, save_dictionary_term,
     seed_default_dictionary,
+    # V7 学校增长情报
+    list_school_scores, get_strategy_card, list_strategy_cards,
+    save_content,
 )
 from database.models import TASK_TYPES
 
@@ -49,6 +52,22 @@ def format_weekly_push(strategy_data: dict, supply_data: dict) -> str:
     """
     _week  = strategy_data.get("week_start", "本周")
     _lines = [f"# 📅 极致教育 · {_week} 周度作战简报\n"]
+
+    # 本周重点学校（来自 school_scores）
+    try:
+        _sch = list_school_scores(limit=50)
+        _s_lv = [s for s in _sch if s["priority_level"] == "S"]
+        _a_lv = [s for s in _sch if s["priority_level"] == "A"]
+        if _s_lv or _a_lv:
+            _lines.append("【本周重点学校】")
+            for _s in _s_lv:
+                _p0 = "、".join(_s["hot_products"][:1]) or "待定"
+                _lines.append(f"  S级 {_s['school_name']}｜{_s['current_stage']}｜P0 {_p0}")
+            if _a_lv:
+                _lines.append("  A级覆盖：" + "、".join(_s["school_name"] for _s in _a_lv))
+            _lines.append("")
+    except Exception:
+        pass
 
     # 推广边界摘要
     _boundaries = supply_data.get("promotion_boundary", [])
@@ -384,6 +403,7 @@ with st.sidebar:
     st.markdown('<div style="font-size:11px;color:#475569;font-weight:600;letter-spacing:1px;padding:4px 0 6px 2px">核心页面</div>', unsafe_allow_html=True)
     page = st.radio("", [
         "📊 公司增长看板",
+        "🏫 学校增长情报台",
         "📈 产品推广策略台",
         "📝 内容池",
         "💼 销售作战台",
@@ -409,8 +429,158 @@ with st.sidebar:
 # ══════════════════════════════════════════════
 # 页面：市场情报台
 # ══════════════════════════════════════════════
-if page == "─────────────":
-    st.info("请从左侧菜单选择一个页面。")
+if page == "🏫 学校增长情报台":
+    st.title("🏫 学校增长情报台")
+    st.caption("基于内部真实数据的学校机会评分与策略卡 · 不含任何外部编造信息")
+
+    _scores = list_school_scores(limit=100)
+    if not _scores:
+        st.warning("尚未评分。请先运行：`python main.py update-school-scores`")
+        st.stop()
+
+    # ── 筛选器 ──
+    _fc = st.columns(7)
+    _f_country  = _fc[0].selectbox("国家", ["全部"] + sorted({s["country"] for s in _scores if s["country"]}))
+    _f_school   = _fc[1].selectbox("学校", ["全部"] + [s["school_name"] for s in _scores])
+    _f_stage    = _fc[2].selectbox("当前阶段", ["全部"] + sorted({s["current_stage"] for s in _scores}))
+    _f_heat     = _fc[3].selectbox("需求热度", ["全部", "high", "medium", "low", "unknown"])
+    _f_priority = _fc[4].selectbox("优先级", ["全部", "S", "A", "B", "C", "低机会", "Unknown"])
+    _f_product  = _fc[5].selectbox("主推产品", ["全部"] + sorted({p for s in _scores for p in s["hot_products"]}))
+    _f_complete = _fc[6].selectbox("资料完整度", ["全部", "资料完整", "有缺口"])
+
+    _filtered = [s for s in _scores
+                 if (_f_country == "全部" or s["country"] == _f_country)
+                 and (_f_school == "全部" or s["school_name"] == _f_school)
+                 and (_f_stage == "全部" or s["current_stage"] == _f_stage)
+                 and (_f_heat == "全部" or s["demand_heat"] == _f_heat)
+                 and (_f_priority == "全部" or s["priority_level"] == _f_priority)
+                 and (_f_product == "全部" or _f_product in s["hot_products"])
+                 and (_f_complete == "全部"
+                      or (_f_complete == "资料完整" and not s["missing_data"])
+                      or (_f_complete == "有缺口" and s["missing_data"]))]
+
+    # ── 排行榜 ──
+    st.subheader("📊 学校机会排行榜")
+    _sort_by = st.radio("排序", ["机会分最高", "风险最高", "资料缺口最多"],
+                        horizontal=True, label_visibility="collapsed")
+    if _sort_by == "风险最高":
+        _filtered.sort(key=lambda s: len(s["risk_notes"]), reverse=True)
+    elif _sort_by == "资料缺口最多":
+        _filtered.sort(key=lambda s: len(s["missing_data"]), reverse=True)
+    else:
+        _filtered.sort(key=lambda s: s["opportunity_score"], reverse=True)
+
+    _PRIO_ICON = {"S": "🔴 S", "A": "🟠 A", "B": "🟡 B", "C": "🟢 C",
+                  "低机会": "⚪ 低机会", "Unknown": "❓ Unknown"}
+    st.dataframe(pd.DataFrame([{
+        "排名": i + 1, "学校": s["school_name"], "国家": s["country"],
+        "机会分": s["opportunity_score"], "优先级": _PRIO_ICON.get(s["priority_level"], s["priority_level"]),
+        "当前阶段": s["current_stage"], "需求热度": s["demand_heat"],
+        "主推产品": "、".join(s["hot_products"][:2]) or "—",
+        "风险提示": s["risk_notes"][0][:30] if s["risk_notes"] else "—",
+        "资料缺口": f"{len(s['missing_data'])}项" if s["missing_data"] else "✓ 完整",
+    } for i, s in enumerate(_filtered)]), use_container_width=True, hide_index=True)
+
+    # ── 策略卡 ──
+    st.subheader("🃏 学校策略卡")
+    _sel = st.selectbox("选择学校查看策略卡", [s["school_name"] for s in _filtered])
+    _sc = next((s for s in _filtered if s["school_name"] == _sel), None)
+    _card = get_strategy_card(_sel) if _sel else None
+
+    if _sc:
+        with st.expander("📐 评分依据与内部证据", expanded=not _card):
+            for r in _sc["score_reason"]:
+                st.markdown(f"- {r}")
+            if _sc["internal_evidence"]:
+                st.markdown("**内部数据依据：**")
+                for e in _sc["internal_evidence"]:
+                    st.markdown(f"- 📌 {e}")
+            for m in _sc["missing_data"]:
+                st.warning(m)
+
+    if not _card:
+        st.info(f"「{_sel}」暂无策略卡。S/A/B 级学校运行 `python main.py generate-school-strategy-cards` 生成；"
+                "Unknown 级学校请先补充数据。")
+    else:
+        _c1, _c2, _c3, _c4 = st.columns(4)
+        _c1.metric("机会分", _sc["opportunity_score"] if _sc else "—")
+        _c2.metric("优先级", _card["priority_level"])
+        _c3.metric("当前阶段", _card["current_stage"])
+        _c4.metric("可信度", {"high": "🟢 高", "medium": "🟡 中", "low": "🔴 低"}.get(_card["confidence"], _card["confidence"]))
+
+        st.markdown("#### 🎯 本周主推")
+        _p1, _p2 = st.columns(2)
+        _p1.success(f"**P0 主推**：{_card['main_product'] or '—'}")
+        _p2.info(f"**P1 次推**：{'、'.join(_card['secondary_products']) or '—'}")
+        if _card["cautious_products"]:
+            st.warning(f"⚠️ 谨慎推广：{'、'.join(_card['cautious_products'])}")
+        if _card["paused_products"]:
+            st.error(f"⏸️ 暂停强推：{'、'.join(_card['paused_products'])}")
+
+        with st.expander("💡 为什么这么推", expanded=True):
+            for w in _card["why_this_strategy"]:
+                st.markdown(f"- {w}")
+            if _card["data_evidence"]:
+                st.caption("数据依据：" + "；".join(str(e) for e in _card["data_evidence"][:5]))
+
+        _t1, _t2, _t3, _t4 = st.tabs(["📣 推广部建议", "💼 顾问建议", "🎓 学管提醒", "🛠 后台支持"])
+        with _t1:
+            for m in _card["marketing_suggestions"]:
+                st.markdown(f"- {m}")
+        with _t2:
+            for m in _card["sales_suggestions"]:
+                st.markdown(f"- {m}")
+        with _t3:
+            for m in _card["academic_support_notes"]:
+                st.markdown(f"- {m}")
+            for r in _card["risk_notes"]:
+                st.warning(r)
+        with _t4:
+            for m in _card["backend_support_notes"]:
+                st.markdown(f"- {m}")
+
+        st.markdown("#### 🔮 未来预判")
+        _f1, _f2, _f3 = st.columns(3)
+        _f1.markdown(f"**未来7天**\n\n{_card['next_7d_prediction'] or '—'}")
+        _f2.markdown(f"**未来14天**\n\n{_card['next_14d_prediction'] or '—'}")
+        _f3.markdown(f"**未来30天**\n\n{_card['next_30d_prediction'] or '—'}")
+
+        # ── 学校级素材生成 ──
+        st.markdown("#### ✨ 基于策略卡生成素材（进入内容池待审核）")
+        _GEN_TYPES = {
+            "小红书选题": "xiaohongshu", "朋友圈文案": "moments", "社群话题": "community",
+            "顾问私聊话术": "sales_script", "转介绍话术": "referral", "海报文案": "poster",
+        }
+        _gcols = st.columns(6)
+        for _i, (_label, _ctype) in enumerate(_GEN_TYPES.items()):
+            if _gcols[_i].button(_label, key=f"gen_school_{_ctype}", use_container_width=True):
+                with st.spinner(f"基于 {_sel} 策略卡生成{_label}..."):
+                    try:
+                        import anthropic as _anthropic
+                        _client = _anthropic.Anthropic()
+                        _gp = (f"你是教育机构推广文案专家。基于以下学校策略卡，生成3条具体的{_label}。\n"
+                               f"学校：{_sel}（{_card['country']}）阶段：{_card['current_stage']}\n"
+                               f"P0主推：{_card['main_product']}；次推：{_card['secondary_products']}\n"
+                               f"推广建议：{json.dumps(_card['marketing_suggestions'], ensure_ascii=False)}\n"
+                               f"销售建议：{json.dumps(_card['sales_suggestions'], ensure_ascii=False)}\n"
+                               f"风险约束：{json.dumps(_card['risk_notes'], ensure_ascii=False)}\n"
+                               f"要求：紧扣该校当前阶段和主推产品，不泛泛而谈；禁止'100%押中/保过'类承诺；"
+                               f"每条之间用'---'分隔。")
+                        _resp = _client.messages.create(
+                            model="claude-sonnet-4-6", max_tokens=1500,
+                            messages=[{"role": "user", "content": _gp}])
+                        _body = _resp.content[0].text.strip()
+                        save_content({
+                            "title": f"{_sel}·{_label}（策略卡生成）",
+                            "content_type": _ctype, "school": _sel,
+                            "target_country": _card["country"], "channel": _ctype,
+                            "content": _body, "status": "pending_review",
+                            "suggested_use": f"基于{_sel}周策略卡，阶段：{_card['current_stage']}",
+                        })
+                        st.success(f"✅ 已生成并存入内容池（待审核）")
+                        st.markdown(_body)
+                    except Exception as _e:
+                        st.error(f"生成失败：{_e}")
 
 elif page == "📡 市场情报台":
     st.title("📡 市场情报台")

@@ -962,6 +962,30 @@ def main():
         if result.get("error"):
             print(f"错误：{result['error']}")
 
+    elif cmd == "update-school-scores":
+        print("\n🏫 计算学校机会评分（内部数据，纯规则，不调用AI）...")
+        from agents.school_opportunity_scoring_agent import SchoolOpportunityScoringAgent
+        top_n = int(args[1]) if len(args) > 1 else 20
+        results = SchoolOpportunityScoringAgent(config).run(top_n=top_n)
+        print(f"\n{'学校':<10s}{'国家':<10s}{'机会分':<6s}{'优先级':<8s}{'阶段':<14s}{'热度':<8s}")
+        for r in results:
+            print(f"{r['school_name']:<10s}{r['country']:<10s}{r['opportunity_score']:<6d}"
+                  f"{r['priority_level']:<8s}{r['current_stage']:<14s}{r['demand_heat']:<8s}")
+        n_unknown = sum(1 for r in results if r["priority_level"] == "Unknown")
+        print(f"\n✅ 已评分 {len(results)} 所学校（其中 {n_unknown} 所资料不足=Unknown），写入 school_scores 表")
+
+    elif cmd == "generate-school-strategy-cards":
+        print("\n🃏 生成学校策略卡（仅 S/A/B 级，资料不足学校跳过）...")
+        from agents.school_strategy_card_agent import SchoolStrategyCardAgent
+        cards = SchoolStrategyCardAgent(config).run()
+        ok = [c for c in cards if "error" not in c]
+        for c in ok:
+            print(f"  ✅ {c['school_name']} [{c['priority_level']}] 主推:{c.get('main_product','')} 可信度:{c.get('confidence','')}")
+        for c in cards:
+            if "error" in c:
+                print(f"  ❌ {c.get('school_name','?')}: {c['error']}")
+        print(f"\n✅ 生成 {len(ok)} 张策略卡，写入 school_strategy_cards 表")
+
     elif cmd == "health-check":
         import sys as _sys
         ok = True

@@ -19,6 +19,7 @@ __all__ = [
     "Order", "Lead", "SchoolCalendar", "MarketSignal", "YearlyPattern",
     "TeacherCapacity", "OrderRiskSignal",
     "CompanyFact", "BusinessDictionaryTerm",
+    "SchoolScore", "SchoolStrategyCard",
 ]
 
 
@@ -483,6 +484,67 @@ TERM_TYPES = (
     "部门名称", "产品名称", "服务类型", "客户类型",
     "风控词", "渠道名称", "学校名称",
 )
+
+# ─────────────────────────────────────────
+# 学校机会评分表 — 内部数据驱动，不允许编造学校节点
+# ─────────────────────────────────────────
+PRIORITY_LEVELS = ("S", "A", "B", "C", "低机会", "Unknown")
+SCHOOL_STAGES = (
+    "开学准备期", "Assessment高峰期", "Final冲刺期",
+    "Dissertation高峰期", "补考/挂科风险期", "低需求维护期", "资料不足",
+)
+DEMAND_HEATS = ("high", "medium", "low", "unknown")
+
+class SchoolScore(Base):
+    __tablename__ = "school_scores"
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    school_name       = Column(String(100), nullable=False)  # 标准学校名
+    country           = Column(String(20))
+    opportunity_score = Column(Integer, default=0)           # 0-100
+    priority_level    = Column(String(10), default="Unknown") # 见 PRIORITY_LEVELS
+    current_stage     = Column(String(30), default="资料不足") # 见 SCHOOL_STAGES
+    demand_heat       = Column(String(10), default="unknown") # 见 DEMAND_HEATS
+    hot_products      = Column(JSON, default=list)            # 最值得推的产品
+    score_reason      = Column(JSON, default=list)            # 每项得分的依据
+    internal_evidence = Column(JSON, default=list)            # 内部数据依据
+    risk_notes        = Column(JSON, default=list)
+    missing_data      = Column(JSON, default=list)            # 缺失信息清单
+    last_scored_at    = Column(DateTime, default=datetime.utcnow)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# 学校策略卡表 — 短卡，每个判断必须带 data_evidence
+# ─────────────────────────────────────────
+class SchoolStrategyCard(Base):
+    __tablename__ = "school_strategy_cards"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    school_name         = Column(String(100), nullable=False)
+    country             = Column(String(20))
+    period              = Column(String(10), default="weekly")  # weekly / monthly
+    priority_level      = Column(String(10))
+    current_stage       = Column(String(30))
+    demand_heat         = Column(String(10))
+    main_product        = Column(String(100))                   # P0 主推
+    secondary_products  = Column(JSON, default=list)            # P1 次推
+    cautious_products   = Column(JSON, default=list)            # 谨慎推广
+    paused_products     = Column(JSON, default=list)            # 暂停强推
+    why_this_strategy   = Column(JSON, default=list)
+    marketing_suggestions    = Column(JSON, default=list)       # 推广部：小红书/朋友圈/社群/海报
+    sales_suggestions        = Column(JSON, default=list)       # 顾问：跟进/话术/节奏/异议
+    academic_support_notes   = Column(JSON, default=list)       # 学管提醒
+    backend_support_notes    = Column(JSON, default=list)       # 后台支持
+    risk_notes          = Column(JSON, default=list)
+    suggested_materials = Column(JSON, default=list)
+    next_7d_prediction  = Column(Text)
+    next_14d_prediction = Column(Text)
+    next_30d_prediction = Column(Text)
+    data_evidence       = Column(JSON, default=list)
+    confidence          = Column(String(10), default="low")     # high/medium/low
+    created_at          = Column(DateTime, default=datetime.utcnow)
+
 
 class BusinessDictionaryTerm(Base):
     __tablename__ = "business_dictionary"

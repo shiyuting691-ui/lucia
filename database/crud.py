@@ -8,7 +8,8 @@ from sqlalchemy import select, desc
 
 from .models import (Content, Campaign, Task, KnowledgeDoc, Product, School,
                      DepartmentFeedback, StrategySuggestion, ContentUsage, WorkflowRun,
-                     CompanyFact, BusinessDictionaryTerm)
+                     CompanyFact, BusinessDictionaryTerm,
+                     SchoolScore, SchoolStrategyCard)
 from .db import get_session
 
 
@@ -1428,3 +1429,121 @@ def seed_default_dictionary():
 
     for d in defaults:
         save_dictionary_term(d)
+
+
+# ─────────────────────────────────────────
+# 学校机会评分 CRUD（V7）
+# ─────────────────────────────────────────
+
+def _school_score_to_dict(s: SchoolScore) -> dict:
+    return {
+        "id": s.id, "school_name": s.school_name, "country": s.country,
+        "opportunity_score": s.opportunity_score, "priority_level": s.priority_level,
+        "current_stage": s.current_stage, "demand_heat": s.demand_heat,
+        "hot_products": s.hot_products or [], "score_reason": s.score_reason or [],
+        "internal_evidence": s.internal_evidence or [], "risk_notes": s.risk_notes or [],
+        "missing_data": s.missing_data or [],
+        "last_scored_at": s.last_scored_at.strftime("%Y-%m-%d %H:%M") if s.last_scored_at else "",
+    }
+
+
+def save_school_score(data: dict) -> int:
+    """按 school_name upsert：同一学校只保留最新一条评分"""
+    with get_session() as s:
+        row = s.execute(select(SchoolScore).where(
+            SchoolScore.school_name == data["school_name"])).scalar_one_or_none()
+        if row is None:
+            row = SchoolScore(school_name=data["school_name"])
+            s.add(row)
+        for k in ("country", "opportunity_score", "priority_level", "current_stage",
+                  "demand_heat", "hot_products", "score_reason", "internal_evidence",
+                  "risk_notes", "missing_data"):
+            if k in data:
+                setattr(row, k, data[k])
+        row.last_scored_at = datetime.utcnow()
+        s.flush()
+        return row.id
+
+
+def list_school_scores(priority_level: str = None, country: str = None,
+                       limit: int = 100) -> List[dict]:
+    with get_session() as s:
+        q = select(SchoolScore).order_by(desc(SchoolScore.opportunity_score))
+        if priority_level:
+            q = q.where(SchoolScore.priority_level == priority_level)
+        if country:
+            q = q.where(SchoolScore.country == country)
+        return [_school_score_to_dict(r) for r in s.execute(q.limit(limit)).scalars()]
+
+
+# ─────────────────────────────────────────
+# 学校策略卡 CRUD（V7）
+# ─────────────────────────────────────────
+
+def _strategy_card_to_dict(c: SchoolStrategyCard) -> dict:
+    return {
+        "id": c.id, "school_name": c.school_name, "country": c.country,
+        "period": c.period, "priority_level": c.priority_level,
+        "current_stage": c.current_stage, "demand_heat": c.demand_heat,
+        "main_product": c.main_product,
+        "secondary_products": c.secondary_products or [],
+        "cautious_products": c.cautious_products or [],
+        "paused_products": c.paused_products or [],
+        "why_this_strategy": c.why_this_strategy or [],
+        "marketing_suggestions": c.marketing_suggestions or [],
+        "sales_suggestions": c.sales_suggestions or [],
+        "academic_support_notes": c.academic_support_notes or [],
+        "backend_support_notes": c.backend_support_notes or [],
+        "risk_notes": c.risk_notes or [],
+        "suggested_materials": c.suggested_materials or [],
+        "next_7d_prediction": c.next_7d_prediction or "",
+        "next_14d_prediction": c.next_14d_prediction or "",
+        "next_30d_prediction": c.next_30d_prediction or "",
+        "data_evidence": c.data_evidence or [],
+        "confidence": c.confidence,
+        "created_at": c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "",
+    }
+
+
+def save_strategy_card(data: dict) -> int:
+    """按 school_name + period upsert：每学校每周期只保留最新一张卡"""
+    with get_session() as s:
+        row = s.execute(select(SchoolStrategyCard).where(
+            SchoolStrategyCard.school_name == data["school_name"],
+            SchoolStrategyCard.period == data.get("period", "weekly"),
+        )).scalar_one_or_none()
+        if row is None:
+            row = SchoolStrategyCard(school_name=data["school_name"],
+                                     period=data.get("period", "weekly"))
+            s.add(row)
+        for k in ("country", "priority_level", "current_stage", "demand_heat",
+                  "main_product", "secondary_products", "cautious_products",
+                  "paused_products", "why_this_strategy", "marketing_suggestions",
+                  "sales_suggestions", "academic_support_notes", "backend_support_notes",
+                  "risk_notes", "suggested_materials", "next_7d_prediction",
+                  "next_14d_prediction", "next_30d_prediction", "data_evidence",
+                  "confidence"):
+            if k in data:
+                setattr(row, k, data[k])
+        row.created_at = datetime.utcnow()
+        s.flush()
+        return row.id
+
+
+def get_strategy_card(school_name: str, period: str = "weekly") -> Optional[dict]:
+    with get_session() as s:
+        row = s.execute(select(SchoolStrategyCard).where(
+            SchoolStrategyCard.school_name == school_name,
+            SchoolStrategyCard.period == period,
+        )).scalar_one_or_none()
+        return _strategy_card_to_dict(row) if row else None
+
+
+def list_strategy_cards(period: str = "weekly", priority_level: str = None,
+                        limit: int = 100) -> List[dict]:
+    with get_session() as s:
+        q = select(SchoolStrategyCard).where(SchoolStrategyCard.period == period)
+        if priority_level:
+            q = q.where(SchoolStrategyCard.priority_level == priority_level)
+        q = q.order_by(desc(SchoolStrategyCard.created_at))
+        return [_strategy_card_to_dict(r) for r in s.execute(q.limit(limit)).scalars()]
