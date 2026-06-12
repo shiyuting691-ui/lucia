@@ -139,40 +139,109 @@ class WeeklyPromotionWorkflow(BaseWorkflow):
             "marketing_suggestion_id": marketing_result.get("suggestion_id"),
         }
 
+    # 产品ID → 中文名（推送中禁止出现英文代码）
+    _PRODUCT_ZH = {
+        "regular": "常规课程辅导", "final_prediction": "Final考前预测",
+        "guaranteed": "保过辅导", "dissertation": "毕业论文辅导",
+        "annual_package": "年度套餐", "dp_premium": "DP高端服务",
+        "ai_learning": "AI合规学习", "ai_compliance": "AI合规学习",
+    }
+
+    def _pname(self, pid: str) -> str:
+        return self._PRODUCT_ZH.get(pid, pid)
+
+    @staticmethod
+    def _pick(suggestions: list, prefix: str, max_len: int = 60) -> str:
+        """从策略卡建议里取指定前缀的那条，去掉前缀和冗余动词，在句读处截断"""
+        for s in suggestions or []:
+            s = str(s)
+            if not s.startswith(prefix):
+                continue
+            s = s[len(prefix):].strip()
+            for verb in ("发布", "推送", "发"):  # 推送文案里已有动词，去掉重复的
+                if s.startswith(verb):
+                    s = s[len(verb):].lstrip("：:")
+                    break
+            for q in "「」『』":  # 引号截断后会不对称，统一去掉
+                s = s.replace(q, "")
+            if len(s) <= max_len:
+                return s
+            cut = s[:max_len]
+            for sep in ("。", "；", "，", ")", "）"):  # 在最近的句读处收尾
+                idx = cut.rfind(sep)
+                if idx >= int(max_len * 0.5):
+                    return cut[:idx + (0 if sep in "。；" else 1)].rstrip("，,") + "…"
+            return cut + "…"
+        return ""
+
+    @staticmethod
+    def _evidence_brief(score: dict) -> str:
+        """从评分依据中提取咨询/订单数字，拼成一句话依据"""
+        import re
+        nums = {}
+        for r in score.get("score_reason", []):
+            m = re.match(r"近7天咨询 (\d+) 条", r)
+            if m: nums["近7天咨询"] = m.group(1)
+            m = re.match(r"近30天订单 (\d+) 单", r)
+            if m: nums["近30天订单"] = m.group(1)
+            m = re.match(r"历史同期\S* ?订单 (\d+) 单", r) or re.match(r"历史同期\(.*\)订单 (\d+) 单", r)
+            if m: nums["未来30天同期订单"] = m.group(1)
+        return "、".join(f"{k}{v}{'条' if '咨询' in k else '单'}" for k, v in nums.items() if v != "0")
+
     def _build_wecom_summary(self, scores: list, cards: list, supply_result: dict) -> str:
-        """周度推送：重点学校 + 推广边界 + 风险，只推摘要"""
+        """周度推送：每所重点学校 = 依据 + 主推 + 推广动作 + 顾问动作，只推能直接执行的内容"""
         import os
         card_map = {c.get("school_name"): c for c in cards if "error" not in c}
-        lines = [f"# 📅 极致教育 · {self.week_start} 周度作战简报\n", "【本周重点学校】\n"]
+        week_end = ""
+        try:
+            from datetime import datetime as _dt, timedelta as _td
+            week_end = (_dt.strptime(self.week_start, "%Y-%m-%d") + _td(days=6)).strftime("%m月%d日")
+            week_label = f"{self.week_start[5:7]}月{self.week_start[8:10]}日–{week_end}"
+        except ValueError:
+            week_label = self.week_start
+
+        lines = [f"# 📅 极致教育 · 本周作战简报（{week_label}）"]
+
+        # 数据时效说明（评分基于2025年同期时必须告知）
+        if any("基于2025年同期" in str(r) for s in scores for r in s.get("score_reason", [])[:1]):
+            lines.append("<font color='comment'>说明：CRM未接入，以下判断基于2025年同期订单/咨询数据</font>")
+        lines.append("")
 
         s_list = [s for s in scores if s["priority_level"] == "S"]
         a_list = [s for s in scores if s["priority_level"] == "A"]
-        if s_list:
-            lines.append("S级重点：")
-            for i, s in enumerate(s_list, 1):
-                c = card_map.get(s["school_name"], {})
-                p0 = c.get("main_product") or "、".join(s["hot_products"][:1]) or "待定"
-                lines.append(f"{i}. {s['school_name']}｜{s['current_stage']}｜P0 {p0}")
-        if a_list:
-            lines.append("\nA级覆盖：")
-            for i, s in enumerate(a_list, 1):
-                lines.append(f"{i}. {s['school_name']}")
-        if not s_list and not a_list:
-            lines.append("本周暂无 S/A 级学校（数据不足或为淡季）")
 
-        risks = [r for s in scores for r in s.get("risk_notes", [])]
+        if not s_list and not a_list:
+            lines.append("本周暂无 S/A 级重点学校（多数学校数据不足，请优先补充订单/咨询/学校日历数据）")
+        for icon, lv_list, lv in (("🔴", s_list, "S"), ("🟠", a_list, "A")):
+            for s in lv_list:
+                c = card_map.get(s["school_name"], {})
+                p0 = c.get("main_product") or self._pname(s["hot_products"][0]) if s["hot_products"] else "待定"
+                lines.append(f"{icon} **{s['school_name']}**（{lv}级·{s['opportunity_score']}分）{s['current_stage']}｜主推：{p0}")
+                ev = self._evidence_brief(s)
+                if ev:
+                    lines.append(f"依据：{ev}")
+                mk = self._pick(c.get("marketing_suggestions"), "小红书：", max_len=48)
+                sl = self._pick(c.get("sales_suggestions"), "重点跟进：", max_len=60)
+                if mk:
+                    lines.append(f"→ 推广（小红书）：{mk}")
+                if sl:
+                    lines.append(f"→ 顾问：{sl}")
+                lines.append("")
+
+        # 风险提醒（已含学校名，去重）
+        risks = list(dict.fromkeys(r for s in scores for r in s.get("risk_notes", [])))
         boundaries = supply_result.get("promotion_boundary", [])
-        risks += [f"{b['product']} 老师储备紧张，谨慎强推"
+        risks += [f"{self._pname(b['product'])} 老师储备紧张，谨慎强推"
                   for b in boundaries if b.get("push_level") in ("cautious", "pause")]
         if risks:
-            lines.append("\n风险提醒：")
-            for i, r in enumerate(dict.fromkeys(risks), 1):   # 去重保序
-                if i > 3: break
+            lines.append("⚠️ **风险提醒**")
+            for i, r in enumerate(risks[:3], 1):
                 lines.append(f"{i}. {r}")
+            lines.append("")
 
         server = os.environ.get("PUBLIC_URL", "http://121.43.83.158")
-        lines.append(f"\n查看学校增长情报台：\n{server}")
-        lines.append("\n<font color='comment'>🤖 极致增长系统自动生成</font>")
+        lines.append(f"完整策略卡（含话术/异议处理/学管提醒）：{server}")
+        lines.append("<font color='comment'>🤖 极致增长系统自动生成</font>")
         return "\n".join(lines)[:2500]
 
     def _send_wecom(self, text: str) -> bool:

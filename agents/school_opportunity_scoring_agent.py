@@ -145,15 +145,16 @@ class SchoolOpportunityScoringAgent:
                    if school.lower() in (exp or "").lower()
                    or any(al.lower() in (exp or "").lower()
                           for al, std in self.alias_map.items() if std == school and len(al) > 2)]
+        matched = list(dict.fromkeys(matched))  # 别名重复匹配去重
         if not matched:
             s7 = 0
             missing.append("缺少老师储备数据（teacher_capacity 无该校匹配），无法判断是否适合强推")
         else:
             ok = sum(1 for st, _ in matched if st in ("充足", "正常"))
             s7 = round(10 * ok / len(matched))
-            tight = [sub for st, sub in matched if st not in ("充足", "正常")]
+            tight = list(dict.fromkeys(sub for st, sub in matched if st not in ("充足", "正常")))
             if tight:
-                risks.append(f"老师资源紧张学科：{'、'.join(tight)}，谨慎强推")
+                risks.append(f"{school} {'/'.join(tight)}老师紧张，接单前先确认档期")
             evidence.append(f"老师储备匹配{len(matched)}个学科，{ok}个状态充足/正常")
         score_reason.append(f"老师资源匹配 → {s7}/10")
 
