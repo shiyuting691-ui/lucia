@@ -1,0 +1,172 @@
+# 营销自动化系统配置文件
+
+anthropic:
+  model: "claude-sonnet-4-6"
+  max_tokens: 4096
+
+# 目标学校（英国 + 澳洲）
+schools:
+  uk:
+    - name: "UCL"
+      full_name: "伦敦大学学院"
+      popular_majors: ["经济学", "金融", "计算机", "建筑", "法律"]
+      exam_period: ["1月", "5月-6月"]
+    - name: "LSE"
+      full_name: "伦敦政治经济学院"
+      popular_majors: ["经济学", "金融", "管理", "会计"]
+      exam_period: ["1月", "5月-6月"]
+    - name: "KCL"
+      full_name: "伦敦国王学院"
+      popular_majors: ["医学", "法律", "商科", "理工"]
+      exam_period: ["1月", "5月-6月"]
+    - name: "曼大"
+      full_name: "曼彻斯特大学"
+      popular_majors: ["商科", "工程", "计算机", "经济"]
+      exam_period: ["1月", "5月-6月"]
+    - name: "爱丁堡"
+      full_name: "爱丁堡大学"
+      popular_majors: ["商科", "计算机", "法律", "医学"]
+      exam_period: ["12月", "4月-5月"]
+    - name: "华威"
+      full_name: "华威大学"
+      popular_majors: ["商科", "经济", "工程", "计算机"]
+      exam_period: ["1月", "5月-6月"]
+    - name: "布里斯托"
+      full_name: "布里斯托大学"
+      popular_majors: ["工程", "法律", "医学", "商科"]
+      exam_period: ["1月", "5月-6月"]
+    - name: "谢菲尔德"
+      full_name: "谢菲尔德大学"
+      popular_majors: ["工程", "建筑", "商科"]
+      exam_period: ["1月", "5月-6月"]
+  australia:
+    - name: "悉大"
+      full_name: "悉尼大学"
+      popular_majors: ["商科", "法律", "医学", "工程"]
+      exam_period: ["6月", "11月-12月"]
+    - name: "墨大"
+      full_name: "墨尔本大学"
+      popular_majors: ["商科", "法律", "工程", "IT"]
+      exam_period: ["6月", "11月-12月"]
+    - name: "UNSW"
+      full_name: "新南威尔士大学"
+      popular_majors: ["工程", "商科", "计算机", "建筑"]
+      exam_period: ["6月", "11月-12月"]
+    - name: "ANU"
+      full_name: "澳大利亚国立大学"
+      popular_majors: ["经济", "政治", "法律", "计算机"]
+      exam_period: ["6月", "11月-12月"]
+    - name: "莫纳什"
+      full_name: "莫纳什大学"
+      popular_majors: ["商科", "药学", "工程", "IT"]
+      exam_period: ["6月", "11月-12月"]
+    - name: "昆大"
+      full_name: "昆士兰大学"
+      popular_majors: ["商科", "工程", "农业", "医学"]
+      exam_period: ["6月", "11月-12月"]
+
+# 产品线配置
+products:
+  - id: "regular"
+    name: "常规辅导"
+    description: "按课时计费，灵活安排，适合期末冲刺或单科补强"
+    price_range: "¥3000-5000/科"
+    selling_points:
+      - "名校在读/毕业学长学姐一对一"
+      - "精准匹配学校+专业+老师出题风格"
+      - "48小时快速响应，紧急开课"
+    target: "临近考试、单科薄弱、时间紧迫"
+
+  - id: "annual_package"
+    name: "学年包"
+    description: "全学年打包服务，一次锁定，全程覆盖"
+    price_range: "¥15000-30000/学年"
+    selling_points:
+      - "全学年锁定优质老师资源"
+      - "省心省力，开学前就搞定"
+      - "学年均摊比单科便宜30%+"
+      - "含作业辅导+论文指导+考前冲刺"
+    target: "大一新生、成绩中等想稳步提升、家长希望全程托底"
+
+  - id: "guaranteed"
+    name: "包过辅导"
+    description: "不过退款，以结果为导向的精英辅导方案"
+    price_range: "¥8000-15000/科"
+    selling_points:
+      - "签协议，不过全退"
+      - "顶尖学长学姐押题命中率高"
+      - "小班冲刺+个性化训练"
+    target: "挂科风险高、补考生、对结果要求确定性高"
+
+  - id: "dissertation"
+    name: "毕业论文辅导（DP）"
+    description: "全程论文指导，从选题到答辩"
+    price_range: "¥15000-50000"
+    selling_points:
+      - "有同专业海外PhD/硕士导师"
+      - "覆盖选题、文献、写作、答辩全流程"
+      - "通过率行业领先"
+    target: "大三大四毕业生、研究生、论文Fail风险学生"
+
+  - id: "b2b"
+    name: "对公合作"
+    description: "与留学中介/高校/培训机构合作，批量导流"
+    selling_points:
+      - "分佣模式灵活"
+      - "专属后台管理学生进度"
+      - "可定制课程包"
+    target: "留学机构、高中国际部、海外学生服务商"
+
+# 渠道配置
+channels:
+  xiaohongshu:
+    enabled: true
+    post_frequency: "daily"  # daily/weekly
+    post_types: ["干货笔记", "学生案例", "备考攻略", "产品种草"]
+    hashtag_strategy: "auto"  # 自动生成标签
+
+  wechat_moments:
+    enabled: true
+    post_frequency: "weekly"
+
+  group_messages:
+    enabled: true
+    types: ["学管群", "顾问群", "老客户群", "转介绍话术"]
+
+  referral:
+    enabled: true
+    generate_scripts: true
+
+# 内容策略
+content_strategy:
+  tone: "专业、亲切、有温度，像学长学姐的建议"
+  language: "中文"
+  avoid: ["过于营销感", "夸大宣传", "违规承诺"]
+  emphasize: ["真实案例", "数据佐证", "限时优惠", "稀缺性"]
+
+# 输出目录
+output:
+  base_dir: "./outputs"
+  structure:
+    - "xiaohongshu/{date}"
+    - "referral_scripts/{date}"
+    - "wechat_content/{date}"
+    - "content_calendar"
+
+# 调度配置
+schedule:
+  daily_content_time: "08:00"   # 每天内容生成时间
+  weekly_plan_day: "Monday"     # 每周规划日
+  timezone: "Asia/Shanghai"
+
+
+# 试点团队配置
+pilot_team:
+  reviewer: Lucia
+  sales:
+    - 销售A
+    - 销售B
+  marketing:
+    - 市场A
+  academic_support:
+    - 学管A

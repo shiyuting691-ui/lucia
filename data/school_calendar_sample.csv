@@ -1,0 +1,16 @@
+school,country,academic_year,term,event_type,event_name,start_date,end_date,confidence,source,notes
+UCL,UK,2025-2026,Term 3,Final,UCL Term 3 考试周,2026-06-16,2026-06-27,high,官方日历,主要考试集中在6月16-27日
+LSE,UK,2025-2026,Summer Term,Final,LSE 夏季考试,2026-06-10,2026-06-30,high,官方日历,考试分散在整个6月
+KCL,UK,2025-2026,Summer,Final,KCL 期末考试,2026-05-20,2026-06-20,high,官方日历,
+UCL,UK,2025-2026,Term 3,Dissertation,UCL 毕业论文提交截止,2026-06-20,2026-06-25,high,官方日历,大三大四学生论文提交高峰
+LSE,UK,2025-2026,Summer,Dissertation,LSE Dissertation截止,2026-07-01,2026-07-10,high,官方日历,
+墨大,Australia,2025-2026,Semester 1,Final,墨大期末考试,2026-06-12,2026-06-28,high,官方日历,澳洲学校6月考试季
+悉大,Australia,2025-2026,Semester 1,Final,悉大期末考试,2026-06-10,2026-06-25,high,官方日历,
+UNSW,Australia,2025-2026,Term 2,Final,UNSW期末考试,2026-06-16,2026-06-28,high,官方日历,
+UCL,UK,2025-2026,Term 3,补考,UCL 补考安排,2026-08-20,2026-08-30,medium,历史推断,往年8月下旬有补考
+LSE,UK,2025-2026,Summer,补考,LSE 补考,2026-08-25,2026-09-05,medium,历史推断,
+UCL,UK,2026-2027,Term 1,开学,UCL 2026-27新学年开学,2026-09-22,2026-09-28,high,官方日历,大一新生入学高峰
+LSE,UK,2026-2027,MT,开学,LSE Michaelmas Term开学,2026-09-28,2026-10-05,high,官方日历,
+墨大,Australia,2026,Semester 2,开学,墨大下半年开学,2026-07-22,2026-07-28,high,官方日历,
+悉大,Australia,2026,Semester 2,新生入学,悉大Sem2新生注册周,2026-07-20,2026-07-26,high,官方日历,
+UCL,UK,2026-2027,Term 1,作业高峰,UCL Term1 作业高峰,2026-11-01,2026-11-30,medium,历史推断,开学后6-8周作业集中

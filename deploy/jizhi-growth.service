@@ -1,0 +1,15 @@
+[Unit]
+Description=Jizhi Education Growth System
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/jizhi-growth-system
+ExecStart=/bin/bash /opt/jizhi-growth-system/deploy/run_app.sh
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

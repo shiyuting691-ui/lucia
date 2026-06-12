@@ -1,0 +1,14 @@
+# 极致教育增长作战系统 · crontab 示例
+# 安装方法：crontab -e，然后粘贴以下内容
+
+# 每天早上 9:00 生成有效提醒并推送企业微信
+0 9 * * * cd /opt/jizhi-growth-system && /opt/jizhi-growth-system/.venv/bin/python main.py run-daily-reminder >> logs/daily_reminder.log 2>&1
+
+# 每周一早上 9:30 生成周度推广建议
+30 9 * * 1 cd /opt/jizhi-growth-system && /opt/jizhi-growth-system/.venv/bin/python main.py run-weekly-promotion >> logs/weekly_promotion.log 2>&1
+
+# 每月 1 号早上 10:00 生成月度推广策略
+0 10 1 * * cd /opt/jizhi-growth-system && /opt/jizhi-growth-system/.venv/bin/python main.py run-monthly-promotion >> logs/monthly_promotion.log 2>&1
+
+# 每天凌晨 2:00 备份 SQLite 数据库
+0 2 * * * /bin/bash /opt/jizhi-growth-system/deploy/backup_sqlite.sh >> logs/backup.log 2>&1

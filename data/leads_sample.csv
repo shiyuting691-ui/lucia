@@ -1,0 +1,15 @@
+inquiry_date,school,country,product_interest,pain_point,deadline,deal_status,lost_reason,sales_owner,source_channel
+2026-05-10,UCL,UK,dissertation,不知道研究方法怎么写,2026-06-20,won,,Lucia,小红书
+2026-05-11,LSE,UK,guaranteed,期末挂科风险很高,2026-06-25,won,,销售A,转介绍
+2026-05-13,KCL,UK,final_prediction,考前不知道复习重点,2026-06-18,won,,销售B,朋友圈
+2026-05-15,Manchester,UK,annual_package,全年课程多不知规划,2026-11-30,in_progress,,销售A,社群
+2026-05-17,Warwick,UK,ai_learning,担心作业被查AI率,2026-06-22,lost,价格太高,Lucia,小红书
+2026-05-19,UNSW,Australia,final_prediction,exam week快到了很慌,2026-06-15,won,,销售B,转介绍
+2026-05-21,Melbourne,Australia,annual_package,不清楚澳洲大学考核方式,2026-11-30,in_progress,,销售A,小红书
+2026-05-24,UCL,UK,guaranteed,导师说可能不及格,2026-07-01,in_progress,,Lucia,私信
+2026-05-27,KCL,UK,dissertation,文献综述写了3遍还被退回,2026-06-30,lost,找了其他机构,销售B,社群
+2026-05-30,LSE,UK,final_prediction,只有2周复习时间,2026-06-28,won,,销售A,转介绍
+2026-06-01,Manchester,UK,dissertation,课题选择困难不知方向,2026-07-10,in_progress,,Lucia,朋友圈
+2026-06-02,UNSW,Australia,guaranteed,三门课同时要考,2026-07-05,in_progress,,销售B,小红书
+2026-06-04,Warwick,UK,annual_package,新学期想提前规划,2026-11-30,lost,自己能处理,销售A,社群
+2026-06-06,Melbourne,Australia,ai_learning,听说学校新出AI检测政策,2026-07-15,in_progress,,Lucia,朋友圈

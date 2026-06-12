@@ -1,0 +1,111 @@
+# ─────────────────────────────────────────
+# 环境变量（绝对不能进 GitHub）
+# ─────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# ─────────────────────────────────────────
+# 数据库（绝对不能进 GitHub）
+# ─────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+marketing.db
+
+# ─────────────────────────────────────────
+# 真实业务数据（绝对不能进 GitHub）
+# ─────────────────────────────────────────
+data/orders_2025*.csv
+data/leads_2025*.csv
+data/orders_2025*.xlsx
+data/leads_2025*.xlsx
+data/*.xls
+data/*.xlsx
+data/marketing.db
+
+# sample / template 文件允许上传（演示用）
+# data/*_sample.csv  ← 保留
+# data/*_template.csv ← 保留
+
+# ─────────────────────────────────────────
+# 知识库真实业务资料（绝对不能进 GitHub）
+# ─────────────────────────────────────────
+# 保留目录结构（每个目录有 .gitkeep），但不提交真实文件
+knowledge_base/**/*.md
+knowledge_base/**/*.docx
+knowledge_base/**/*.doc
+knowledge_base/**/*.pdf
+knowledge_base/**/*.html
+knowledge_base/**/*.htm
+knowledge_base/**/*.txt
+knowledge_base/**/*.csv
+knowledge_base/**/*.pptx
+knowledge_base/**/*.ppt
+knowledge_base/**/*.jpg
+knowledge_base/**/*.jpeg
+knowledge_base/**/*.png
+knowledge_base/**/*.gif
+knowledge_base/heima28/
+
+# Python 知识库模块允许上传（是代码，不是业务资料）
+!knowledge_base/*.py
+!knowledge_base/__pycache__/
+
+# ─────────────────────────────────────────
+# 运行时产出（不需要进 GitHub）
+# ─────────────────────────────────────────
+outputs/
+logs/
+*.log
+backups/
+
+# ─────────────────────────────────────────
+# Node.js（poster_render.js 的遗留依赖）
+# ─────────────────────────────────────────
+node_modules/
+package-lock.json
+yarn.lock
+
+# ─────────────────────────────────────────
+# Streamlit
+# ─────────────────────────────────────────
+.streamlit/secrets.toml
+
+# ─────────────────────────────────────────
+# macOS / IDE
+# ─────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
