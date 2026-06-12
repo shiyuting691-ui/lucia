@@ -26,32 +26,32 @@ class WeeklyPromotionWorkflow(BaseWorkflow):
         from agents.weekly_marketing_suggestion_agent import WeeklyMarketingSuggestionAgent
         from agents.product_supply_risk_agent import ProductSupplyRiskAgent
 
+        from services.agent_runner import AgentRunner
+        runner = AgentRunner(workflow_name=self.name)
+
         sales_result    = {}
         marketing_result= {}
         supply_result   = {}
         school_summary  = ""
 
         # Step -1: 学校机会评分（纯规则，不调用AI）
-        try:
-            from agents.school_opportunity_scoring_agent import SchoolOpportunityScoringAgent
-            scores = SchoolOpportunityScoringAgent(self.config).run(top_n=20)
-            self._add_step("update_school_scores", "success", records=len(scores),
-                           note=f"S/A级={sum(1 for s in scores if s['priority_level'] in ('S','A'))}")
-        except Exception as e:
-            scores = []
-            self._add_step("update_school_scores", "error", note=str(e))
-            logger.error(f"[WeeklyPromotionWorkflow] school scoring failed: {e}")
+        from agents.school_opportunity_scoring_agent import SchoolOpportunityScoringAgent
+        r = runner.run("SchoolOpportunityScoringAgent",
+                       lambda: SchoolOpportunityScoringAgent(self.config).run(top_n=20),
+                       input_summary=f"week={self.week_start} top_n=20")
+        scores = r["output"] if r["status"] == "success" else []
+        self._add_step("update_school_scores", r["status"], records=len(scores),
+                       note=r["error_message"] or
+                       f"S/A级={sum(1 for s in scores if s['priority_level'] in ('S','A'))}")
 
         # Step -1b: 学校策略卡（仅 S/A/B 级）
-        try:
-            from agents.school_strategy_card_agent import SchoolStrategyCardAgent
-            cards = SchoolStrategyCardAgent(self.config).run()
-            ok_cards = [c for c in cards if "error" not in c]
-            self._add_step("generate_school_strategy_cards", "success", records=len(ok_cards))
-        except Exception as e:
-            ok_cards = []
-            self._add_step("generate_school_strategy_cards", "error", note=str(e))
-            logger.error(f"[WeeklyPromotionWorkflow] strategy cards failed: {e}")
+        from agents.school_strategy_card_agent import SchoolStrategyCardAgent
+        r = runner.run("SchoolStrategyCardAgent",
+                       lambda: SchoolStrategyCardAgent(self.config).run(),
+                       input_summary=f"week={self.week_start}")
+        ok_cards = [c for c in r["output"] if "error" not in c] if r["status"] == "success" else []
+        self._add_step("generate_school_strategy_cards", r["status"],
+                       records=len(ok_cards), note=r["error_message"])
 
         # 学校维度摘要（注入到周度建议的 extra_context）
         try:
@@ -73,19 +73,13 @@ class WeeklyPromotionWorkflow(BaseWorkflow):
             pass
 
         # Step 0: 产品供给与订单风险分析（为后续建议提供推广边界）
-        try:
-            supply_agent  = ProductSupplyRiskAgent(self.config)
-            supply_result = supply_agent.analyze(period_days=14)
-            self._add_step(
-                "product_supply_risk_analysis",
-                "success",
-                records=1,
-                note=f"week={self.week_start} orders={supply_result.get('order_count',0)}",
-            )
-            logger.info(f"[WeeklyPromotionWorkflow] supply risk analysis done")
-        except Exception as e:
-            self._add_step("product_supply_risk_analysis", "error", note=str(e))
-            logger.error(f"[WeeklyPromotionWorkflow] supply risk step failed: {e}")
+        r = runner.run("ProductSupplyRiskAgent",
+                       lambda: ProductSupplyRiskAgent(self.config).analyze(period_days=14),
+                       input_summary=f"week={self.week_start} period_days=14")
+        supply_result = r["output"] if r["status"] == "success" else {}
+        self._add_step("product_supply_risk_analysis", r["status"], records=1,
+                       note=r["error_message"] or
+                       f"week={self.week_start} orders={supply_result.get('order_count',0)}")
 
         # 从 supply_result 提取推广边界摘要（注入到下方建议的 extra_context）
         _boundary_summary = ""
@@ -105,39 +99,27 @@ class WeeklyPromotionWorkflow(BaseWorkflow):
         except Exception:
             pass
 
+        _ctx = "\n\n".join(x for x in (_boundary_summary, school_summary) if x)
+
         # Step 1: 销售建议
-        try:
-            agent = WeeklySalesSuggestionAgent(self.config)
-            sales_result = agent.generate(
-                week_start=self.week_start,
-                extra_context="\n\n".join(x for x in (_boundary_summary, school_summary) if x),
-            )
-            self._add_step(
-                "generate_weekly_sales_suggestion",
-                "success",
-                records=1,
-                note=f"week={self.week_start} suggestion_id={sales_result.get('suggestion_id')}",
-            )
-        except Exception as e:
-            self._add_step("generate_weekly_sales_suggestion", "error", note=str(e))
-            logger.error(f"[WeeklyPromotionWorkflow] sales step failed: {e}")
+        r = runner.run("WeeklySalesSuggestionAgent",
+                       lambda: WeeklySalesSuggestionAgent(self.config).generate(
+                           week_start=self.week_start, extra_context=_ctx),
+                       input_summary=f"week={self.week_start}")
+        sales_result = r["output"] if r["status"] == "success" else {}
+        self._add_step("generate_weekly_sales_suggestion", r["status"], records=1,
+                       note=r["error_message"] or
+                       f"week={self.week_start} suggestion_id={sales_result.get('suggestion_id')}")
 
         # Step 2: 市场内容建议
-        try:
-            agent2 = WeeklyMarketingSuggestionAgent(self.config)
-            marketing_result = agent2.generate(
-                week_start=self.week_start,
-                extra_context="\n\n".join(x for x in (_boundary_summary, school_summary) if x),
-            )
-            self._add_step(
-                "generate_weekly_marketing_suggestion",
-                "success",
-                records=1,
-                note=f"week={self.week_start} suggestion_id={marketing_result.get('suggestion_id')}",
-            )
-        except Exception as e:
-            self._add_step("generate_weekly_marketing_suggestion", "error", note=str(e))
-            logger.error(f"[WeeklyPromotionWorkflow] marketing step failed: {e}")
+        r = runner.run("WeeklyMarketingSuggestionAgent",
+                       lambda: WeeklyMarketingSuggestionAgent(self.config).generate(
+                           week_start=self.week_start, extra_context=_ctx),
+                       input_summary=f"week={self.week_start}")
+        marketing_result = r["output"] if r["status"] == "success" else {}
+        self._add_step("generate_weekly_marketing_suggestion", r["status"], records=1,
+                       note=r["error_message"] or
+                       f"week={self.week_start} suggestion_id={marketing_result.get('suggestion_id')}")
 
         # Step 3: 企业微信推送（摘要，不推长报告）
         try:

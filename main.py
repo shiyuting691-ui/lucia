@@ -299,17 +299,16 @@ def main():
         print(f"✅ 今日营销动作已生成并推送，请运行 python main.py dashboard 查看")
         return
 
-    if cmd == "init":
-        orchestrator = OrchestratorAgent(config)
-        cmd_init(orchestrator)
-
-    elif cmd == "daily":
-        orchestrator = OrchestratorAgent(config)
-        cmd_daily(orchestrator)
-
-    elif cmd == "weekly":
-        orchestrator = OrchestratorAgent(config)
-        cmd_weekly(orchestrator)
+    if cmd in ("init", "daily", "weekly"):
+        # OrchestratorAgent 已废弃（registry status=deprecated），旧编排流程不再执行
+        _REPLACEMENT = {
+            "init":   "数据库表已自动创建；基础素材请通过页面或 run-weekly-promotion 生成",
+            "daily":  "python main.py run-daily  或  run-daily-reminder",
+            "weekly": "python main.py run-weekly-promotion",
+        }
+        print(f"⚠️  命令 '{cmd}' 已废弃：旧版 OrchestratorAgent 编排流程已被 workflows/ 体系取代。")
+        print(f"    替代方式：{_REPLACEMENT[cmd]}")
+        return
 
     elif cmd == "post":
         if len(args) < 3:

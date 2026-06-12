@@ -28,6 +28,11 @@ class ContentGenerationAgent:
         self.config = config
         self.model = config["anthropic"]["model"]
         self._product_map = {p["id"]: p for p in config["products"]}
+        self._gba = GroundedBusinessAgent()
+
+    def _check_grounding(self) -> dict:
+        """生成前事实闸门：can_generate=False 时调用方应中止"""
+        return self._gba.get_context("content_generation")
 
     def generate_posts_from_calendar(self, calendar: dict, max_posts: int = 10) -> list[dict]:
         """从日历节点批量生成小红书帖子"""
@@ -51,6 +56,11 @@ class ContentGenerationAgent:
         return self._generate_single_post(node, "")
 
     def _generate_single_post(self, node: dict, calendar_summary: str) -> dict:
+        _g = self._check_grounding()
+        if not _g.get("can_generate"):
+            return {"error": "公司事实库未确认，内容生成被阻止",
+                    "can_generate": False,
+                    "missing_info": _g.get("missing_information", [])}
         product_id = node.get("recommended_product", "regular")
         product = self._product_map.get(product_id, {})
         school_focus = "、".join(node.get("school_focus", [])) or "留学生通用"

@@ -18,12 +18,19 @@ class SalesMaterialAgent:
         self.config = config
         self.client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
         self.model = config.get("anthropic", {}).get("model", "claude-sonnet-4-6")
+        self._gba = GroundedBusinessAgent()
 
     def run(self, context: dict) -> dict:
         """
         根据业务背景生成每日销售素材包（朋友圈/社群/私信话术各 1 条）
         返回 {"contents_saved": N, "items": [...]}
         """
+        _g = self._gba.get_context("sales_material")
+        if not _g.get("can_generate"):
+            return {"contents_saved": 0, "items": [],
+                    "error": "公司事实库未确认，销售素材生成被阻止",
+                    "can_generate": False,
+                    "missing_info": _g.get("missing_information", [])}
         today = context.get("today", datetime.utcnow().strftime("%Y-%m-%d"))
         active_campaigns = context.get("active_campaigns", [])
         campaign_summary = (

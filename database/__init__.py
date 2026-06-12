@@ -25,6 +25,9 @@ from .crud import (
     # V7 学校增长情报
     save_school_score, list_school_scores,
     save_strategy_card, get_strategy_card, list_strategy_cards,
+    # V8 Agent 管理
+    save_agent_run, list_agent_runs, get_agent_last_runs,
+    save_agent_feedback, list_agent_feedbacks,
 )
 
 __all__ = [
@@ -54,4 +57,7 @@ __all__ = [
     # V7 学校增长情报
     "save_school_score", "list_school_scores",
     "save_strategy_card", "get_strategy_card", "list_strategy_cards",
+    # V8 Agent 管理
+    "save_agent_run", "list_agent_runs", "get_agent_last_runs",
+    "save_agent_feedback", "list_agent_feedbacks",
 ]

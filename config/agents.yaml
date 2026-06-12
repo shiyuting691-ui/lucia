@@ -1,0 +1,93 @@
+# Agent 启停配置 — 优先级高于 agents/agent_registry.py 默认值
+# 修改后无需改代码，重启服务生效。停用 = 不参与 workflow，代码保留。
+# status: active / paused / deprecated / experimental
+
+agents:
+  # ── 必须启用（核心闭环）──
+  GroundedBusinessAgent:
+    enabled: true
+    status: active
+  FactExtractionAgent:
+    enabled: true
+    status: active
+  DataIngestionAgent:
+    enabled: true
+    status: active
+  PromotionStrategyAgent:
+    enabled: true
+    status: active
+  ProductSupplyRiskAgent:
+    enabled: true
+    status: active
+  WeeklyMarketingSuggestionAgent:
+    enabled: true
+    status: active
+  WeeklySalesSuggestionAgent:
+    enabled: true
+    status: active
+  ContentGenerationAgent:
+    enabled: true
+    status: active
+  SalesMaterialAgent:
+    enabled: true
+    status: active
+  RiskReviewAgent:
+    enabled: true
+    status: active
+  DailyEffectiveReminderAgent:
+    enabled: true
+    status: active
+  DistributionAgent:
+    enabled: true
+    status: active
+  SchoolOpportunityScoringAgent:
+    enabled: true
+    status: active
+  SchoolStrategyCardAgent:
+    enabled: true
+    status: active
+  ReferralMaterialAgent:
+    enabled: true
+    status: active
+
+  # ── 暂时停用 ──
+  PosterAgent:
+    enabled: false
+    status: paused
+  ProductLaunchAgent:
+    enabled: false
+    status: paused
+  ProductImprovementAgent:
+    enabled: false
+    status: paused
+  FeedbackCollectorAgent:
+    enabled: false
+    status: paused
+  PlanningAgent:
+    enabled: false
+    status: paused
+
+  # ── 废弃（不允许 workflow 调用）──
+  OrchestratorAgent:
+    enabled: false
+    status: deprecated
+  ExamCalendarAgent:
+    enabled: false
+    status: deprecated
+
+  # ── 待确认 ──
+  BusinessContextAgent:
+    enabled: true
+    status: experimental
+  InsightAgent:
+    enabled: true
+    status: experimental
+  DepartmentTaskAgent:
+    enabled: true
+    status: experimental
+  HistoricalPatternAgent:
+    enabled: true
+    status: active
+  SchoolMarketIntelligenceAgent:
+    enabled: true
+    status: active

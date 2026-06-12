@@ -1547,3 +1547,102 @@ def list_strategy_cards(period: str = "weekly", priority_level: str = None,
             q = q.where(SchoolStrategyCard.priority_level == priority_level)
         q = q.order_by(desc(SchoolStrategyCard.created_at))
         return [_strategy_card_to_dict(r) for r in s.execute(q.limit(limit)).scalars()]
+
+
+# ─────────────────────────────────────────
+# Agent 运行日志 + 质量反馈 CRUD（V8）
+# ─────────────────────────────────────────
+
+def save_agent_run(data: dict) -> int:
+    from .models import AgentRun
+    with get_session() as s:
+        row = AgentRun(
+            workflow_name    = data.get("workflow_name", ""),
+            agent_name       = data["agent_name"],
+            agent_layer      = data.get("agent_layer", ""),
+            run_id           = data.get("run_id", ""),
+            status           = data.get("status", "failed"),
+            input_summary    = (data.get("input_summary") or "")[:1000],
+            output_summary   = (data.get("output_summary") or "")[:1000],
+            error_message    = data.get("error_message"),
+            tokens_used      = data.get("tokens_used", 0),
+            cost_estimate    = data.get("cost_estimate", 0.0),
+            duration_seconds = data.get("duration_seconds", 0.0),
+            started_at       = data.get("started_at"),
+            finished_at      = data.get("finished_at"),
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_agent_runs(agent_name: str = None, status: str = None,
+                    days: int = 7, limit: int = 200) -> List[dict]:
+    from .models import AgentRun
+    from datetime import timedelta
+    with get_session() as s:
+        q = select(AgentRun).order_by(desc(AgentRun.created_at))
+        if agent_name:
+            q = q.where(AgentRun.agent_name == agent_name)
+        if status:
+            q = q.where(AgentRun.status == status)
+        if days:
+            q = q.where(AgentRun.created_at >= datetime.utcnow() - timedelta(days=days))
+        rows = s.execute(q.limit(limit)).scalars()
+        return [{
+            "id": r.id, "workflow_name": r.workflow_name, "agent_name": r.agent_name,
+            "agent_layer": r.agent_layer, "run_id": r.run_id, "status": r.status,
+            "input_summary": r.input_summary, "output_summary": r.output_summary,
+            "error_message": r.error_message, "tokens_used": r.tokens_used,
+            "cost_estimate": r.cost_estimate, "duration_seconds": r.duration_seconds,
+            "started_at": r.started_at.strftime("%m-%d %H:%M:%S") if r.started_at else "",
+            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
+        } for r in rows]
+
+
+def get_agent_last_runs() -> dict:
+    """每个 agent 的最近一次运行（管理中心总览用）"""
+    from .models import AgentRun
+    with get_session() as s:
+        rows = s.execute(select(AgentRun).order_by(desc(AgentRun.created_at)).limit(500)).scalars()
+        latest = {}
+        for r in rows:
+            if r.agent_name not in latest:
+                latest[r.agent_name] = {
+                    "status": r.status, "error_message": r.error_message,
+                    "at": r.created_at.strftime("%m-%d %H:%M") if r.created_at else "",
+                }
+        return latest
+
+
+def save_agent_feedback(data: dict) -> int:
+    from .models import AgentFeedback
+    with get_session() as s:
+        row = AgentFeedback(
+            agent_run_id        = data.get("agent_run_id"),
+            agent_name          = data["agent_name"],
+            feedback_user       = data.get("feedback_user", ""),
+            usefulness_score    = data.get("usefulness_score"),
+            accuracy_score      = data.get("accuracy_score"),
+            actionability_score = data.get("actionability_score"),
+            hallucination_flag  = bool(data.get("hallucination_flag", False)),
+            feedback_text       = data.get("feedback_text", ""),
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_agent_feedbacks(agent_name: str = None, limit: int = 100) -> List[dict]:
+    from .models import AgentFeedback
+    with get_session() as s:
+        q = select(AgentFeedback).order_by(desc(AgentFeedback.created_at))
+        if agent_name:
+            q = q.where(AgentFeedback.agent_name == agent_name)
+        return [{
+            "id": r.id, "agent_run_id": r.agent_run_id, "agent_name": r.agent_name,
+            "feedback_user": r.feedback_user, "usefulness_score": r.usefulness_score,
+            "accuracy_score": r.accuracy_score, "actionability_score": r.actionability_score,
+            "hallucination_flag": r.hallucination_flag, "feedback_text": r.feedback_text,
+            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
+        } for r in s.execute(q.limit(limit)).scalars()]

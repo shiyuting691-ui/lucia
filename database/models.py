@@ -20,6 +20,7 @@ __all__ = [
     "TeacherCapacity", "OrderRiskSignal",
     "CompanyFact", "BusinessDictionaryTerm",
     "SchoolScore", "SchoolStrategyCard",
+    "AgentRun", "AgentFeedback",
 ]
 
 
@@ -559,3 +560,46 @@ class BusinessDictionaryTerm(Base):
     is_active      = Column(Boolean, default=True)
     created_at     = Column(DateTime, default=datetime.utcnow)
     updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# Agent 运行日志表（V8）— 每次 Agent 运行必须记录
+# ─────────────────────────────────────────
+AGENT_RUN_STATUSES = ("success", "failed", "skipped", "blocked")
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    workflow_name    = Column(String(100))
+    agent_name       = Column(String(100), nullable=False)
+    agent_layer      = Column(String(30))
+    run_id           = Column(String(50))                  # 同一workflow run共享
+    status           = Column(String(20), nullable=False)  # 见 AGENT_RUN_STATUSES
+    input_summary    = Column(Text)
+    output_summary   = Column(Text)
+    error_message    = Column(Text)                        # 错误不允许静默吞掉
+    tokens_used      = Column(Integer, default=0)
+    cost_estimate    = Column(Float, default=0.0)          # USD
+    duration_seconds = Column(Float, default=0.0)
+    started_at       = Column(DateTime)
+    finished_at      = Column(DateTime)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# Agent 输出质量反馈表（V8）— 人工评分，用于优化 prompt
+# ─────────────────────────────────────────
+class AgentFeedback(Base):
+    __tablename__ = "agent_feedbacks"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    agent_run_id        = Column(Integer)
+    agent_name          = Column(String(100), nullable=False)
+    feedback_user       = Column(String(50))
+    usefulness_score    = Column(Integer)   # 1-5
+    accuracy_score      = Column(Integer)   # 1-5
+    actionability_score = Column(Integer)   # 1-5
+    hallucination_flag  = Column(Boolean, default=False)
+    feedback_text       = Column(Text)
+    created_at          = Column(DateTime, default=datetime.utcnow)

@@ -3,6 +3,7 @@ ReferralMaterialAgent — 生成转介绍话术、朋友圈文案、群发消息
 """
 import json
 from anthropic import Anthropic
+from agents.grounded_business_agent import GroundedBusinessAgent
 
 
 SYSTEM_PROMPT = """你是一个专业的留学教育销售顾问和文案专家。
@@ -21,8 +22,14 @@ class ReferralMaterialAgent:
         self.config = config
         self.model = config["anthropic"]["model"]
         self._product_map = {p["id"]: p for p in config["products"]}
+        self._gba = GroundedBusinessAgent()
 
     def generate_referral_kit(self, product_id: str, school: str = None, country: str = None) -> dict:
+        _g = self._gba.get_context("content_generation")
+        if not _g.get("can_generate"):
+            return {"error": "公司事实库未确认，转介绍素材生成被阻止",
+                    "can_generate": False,
+                    "missing_info": _g.get("missing_information", [])}
         """生成一套完整的转介绍素材包"""
         product = self._product_map.get(product_id, {})
         context = self._build_context(product, school, country)

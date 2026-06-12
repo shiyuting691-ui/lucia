@@ -419,6 +419,7 @@ with st.sidebar:
             "🗣️ 产品反馈台",
             "🧭 战略建议台",
             "🤖 自动化工作流",
+            "🛠 Agent管理中心",
         ], label_visibility="collapsed", key="more_tools")
     if _more != "（收起）":
         page = _more
@@ -581,6 +582,131 @@ if page == "🏫 学校增长情报台":
                         st.markdown(_body)
                     except Exception as _e:
                         st.error(f"生成失败：{_e}")
+
+elif page == "🛠 Agent管理中心":
+    st.title("🛠 Agent 管理中心")
+    st.caption("管理/技术专用 · Agent 分层、启停、运行日志与质量反馈 · 启停配置见 config/agents.yaml")
+
+    from agents.agent_registry import load_registry, GROUNDING_REQUIRED, LAYERS
+    from database import list_agent_runs, get_agent_last_runs, save_agent_feedback, list_agent_feedbacks
+
+    _reg = load_registry()
+    _last = get_agent_last_runs()
+
+    _tab1, _tab2, _tab3, _tab4, _tab5 = st.tabs(
+        ["📋 Agent总览", "🏗 分层视图", "📜 运行日志", "⭐ 质量反馈", "💡 启停建议"])
+
+    with _tab1:
+        _fc = st.columns(5)
+        _f_layer  = _fc[0].selectbox("层级", ["全部"] + list(LAYERS))
+        _f_status = _fc[1].selectbox("状态", ["全部", "active", "paused", "deprecated", "experimental"])
+        _f_en     = _fc[2].selectbox("是否启用", ["全部", "启用", "停用"])
+        _f_llm    = _fc[3].selectbox("是否调用LLM", ["全部", "是", "否"])
+        _f_fail   = _fc[4].selectbox("最近失败", ["全部", "仅失败"])
+
+        _rows = []
+        for _name, _info in _reg.items():
+            _lr = _last.get(_name, {})
+            if _f_layer != "全部" and _info["layer"] != _f_layer: continue
+            if _f_status != "全部" and _info["status"] != _f_status: continue
+            if _f_en != "全部" and _info["enabled"] != (_f_en == "启用"): continue
+            if _f_llm != "全部" and _info["uses_llm"] != (_f_llm == "是"): continue
+            if _f_fail == "仅失败" and _lr.get("status") != "failed": continue
+            _rows.append({
+                "Agent": _name, "中文名": _info["display_name"], "层级": _info["layer"],
+                "职责": _info["description"][:40],
+                "状态": {"active":"🟢","paused":"⏸️","deprecated":"🚫","experimental":"🧪"}.get(_info["status"],"") + _info["status"],
+                "启用": "✅" if _info["enabled"] else "❌",
+                "LLM": "✅" if _info["uses_llm"] else "—",
+                "需事实校验": "🔒" if _name in GROUNDING_REQUIRED else "—",
+                "最近运行": _lr.get("at", "从未"),
+                "最近结果": _lr.get("status", "—"),
+                "最近错误": (_lr.get("error_message") or "")[:30] or "—",
+            })
+        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+
+    with _tab2:
+        for _layer in LAYERS:
+            _in_layer = {n: i for n, i in _reg.items() if i["layer"] == _layer}
+            _on = sum(1 for i in _in_layer.values() if i["enabled"])
+            st.markdown(f"#### {_layer}（{len(_in_layer)}个，启用{_on}个）")
+            _cols = st.columns(min(4, max(1, len(_in_layer))))
+            for _i, (_n, _info) in enumerate(_in_layer.items()):
+                _icon = "🟢" if _info["enabled"] else ("🚫" if _info["status"] == "deprecated" else "⏸️")
+                _cols[_i % 4].markdown(f"{_icon} **{_info['display_name']}**<br>"
+                                       f"<small>{_n}<br>{_info['status']}</small>",
+                                       unsafe_allow_html=True)
+            st.divider()
+
+    with _tab3:
+        _lc = st.columns(3)
+        _l_days  = _lc[0].selectbox("时间范围", ["最近24小时", "最近7天", "最近30天"], index=1)
+        _l_agent = _lc[1].selectbox("Agent", ["全部"] + sorted(_reg.keys()), key="log_agent")
+        _l_stat  = _lc[2].selectbox("状态", ["全部", "success", "failed", "skipped", "blocked"], key="log_stat")
+        _days = {"最近24小时": 1, "最近7天": 7, "最近30天": 30}[_l_days]
+        _logs = list_agent_runs(
+            agent_name=None if _l_agent == "全部" else _l_agent,
+            status=None if _l_stat == "全部" else _l_stat, days=_days)
+        if not _logs:
+            st.info("该时间范围内无运行记录")
+        else:
+            st.dataframe(pd.DataFrame([{
+                "时间": l["started_at"], "Workflow": l["workflow_name"], "Agent": l["agent_name"],
+                "状态": {"success":"✅","failed":"❌","skipped":"⏭️","blocked":"🚧"}.get(l["status"],"") + l["status"],
+                "耗时(s)": l["duration_seconds"], "Tokens": l["tokens_used"],
+                "Cost($)": l["cost_estimate"],
+                "输入": (l["input_summary"] or "")[:40],
+                "输出": (l["output_summary"] or "")[:40],
+                "错误": (l["error_message"] or "")[:60],
+            } for l in _logs]), use_container_width=True, hide_index=True)
+
+    with _tab4:
+        st.markdown("##### 对某次 Agent 运行打分（用于后续优化 prompt）")
+        _recent = list_agent_runs(days=7, limit=50)
+        if _recent:
+            _run_opts = {f"#{l['id']} {l['agent_name']} {l['started_at']} [{l['status']}]": l for l in _recent}
+            _sel_run = st.selectbox("选择运行记录", list(_run_opts.keys()))
+            _r = _run_opts[_sel_run]
+            with st.form("agent_feedback_form"):
+                _s1 = st.slider("有用程度", 1, 5, 3)
+                _s2 = st.slider("准确程度", 1, 5, 3)
+                _s3 = st.slider("可执行程度", 1, 5, 3)
+                _hf = st.checkbox("存在幻觉/编造内容")
+                _ft = st.text_area("反馈备注", placeholder="例如：建议太泛、学校信息有误…")
+                _fu = st.text_input("评价人", value="Lucia")
+                if st.form_submit_button("提交评分", type="primary"):
+                    save_agent_feedback({
+                        "agent_run_id": _r["id"], "agent_name": _r["agent_name"],
+                        "feedback_user": _fu, "usefulness_score": _s1,
+                        "accuracy_score": _s2, "actionability_score": _s3,
+                        "hallucination_flag": _hf, "feedback_text": _ft,
+                    })
+                    st.success("✅ 反馈已保存")
+        else:
+            st.info("最近7天无运行记录可评分")
+
+        _fbs = list_agent_feedbacks(limit=30)
+        if _fbs:
+            st.markdown("##### 历史反馈")
+            st.dataframe(pd.DataFrame([{
+                "时间": f["created_at"], "Agent": f["agent_name"], "评价人": f["feedback_user"],
+                "有用": f["usefulness_score"], "准确": f["accuracy_score"],
+                "可执行": f["actionability_score"],
+                "幻觉": "⚠️是" if f["hallucination_flag"] else "否",
+                "备注": (f["feedback_text"] or "")[:50],
+            } for f in _fbs]), use_container_width=True, hide_index=True)
+
+    with _tab5:
+        _SUGGEST = {
+            "必须启用": [n for n, i in _reg.items() if i["enabled"] and i["status"] == "active"],
+            "待确认（experimental）": [n for n, i in _reg.items() if i["status"] == "experimental"],
+            "可暂时停用（已停用）": [n for n, i in _reg.items() if not i["enabled"] and i["status"] == "paused"],
+            "建议废弃（deprecated）": [n for n, i in _reg.items() if i["status"] == "deprecated"],
+        }
+        for _k, _v in _SUGGEST.items():
+            st.markdown(f"**{_k}（{len(_v)}）**：" + ("、".join(_v) or "无"))
+        st.caption("调整方式：编辑 config/agents.yaml 中对应 agent 的 enabled / status，重启服务生效。"
+                   "停用不删除代码，随时可恢复。")
 
 elif page == "📡 市场情报台":
     st.title("📡 市场情报台")
