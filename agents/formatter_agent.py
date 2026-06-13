@@ -167,9 +167,9 @@ class FormatterAgent:
         # ── 分部门 ──
         tf = plan.get("team_focus", {})
         team_lines = (
-            f">📚 **学管部：** {tf.get('xueguan','')[:80]}\n\n"
-            f">💼 **顾问部：** {tf.get('consultant','')[:80]}\n\n"
-            f">📱 **运营：** {tf.get('operation','')[:80]}"
+            f">📚 **学管：** {tf.get('xueguan','')[:80]}\n\n"
+            f">💼 **顾问：** {tf.get('consultant','')[:80]}\n\n"
+            f">📱 **推广部：** {tf.get('operation','')[:80]}"
         )
         blocks.append(f"## 👥 分部门分工\n{team_lines}")
 

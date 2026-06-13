@@ -6,7 +6,7 @@ from anthropic import Anthropic
 from agents.grounded_business_agent import GroundedBusinessAgent
 
 
-SYSTEM_PROMPT = """你是一个专业的留学教育销售顾问和文案专家。
+SYSTEM_PROMPT = """你是一个专业的留学教育顾问和文案专家。
 你深度理解中国留学生家长和学生的心理，能写出真实、有温度、不让人反感的转介绍话术。
 
 写作风格：
@@ -61,8 +61,8 @@ class ReferralMaterialAgent:
     }}
   ],
   "group_messages": {{
-    "xueguan_group": "学管部群发消息（针对老客户，150字内）",
-    "consultant_group": "顾问部群发话术（销售使用，100字内）",
+    "xueguan_group": "学管群发消息（针对老客户，150字内）",
+    "consultant_group": "顾问群发话术（获客/跟进使用，100字内）",
     "new_lead_first_msg": "新咨询客户第一条消息（引导付费，80字内）"
   }},
   "follow_up_sequence": [

@@ -374,10 +374,10 @@ PRODUCT_ZH = {
     "ai_learning":      "AI合规学习",
     "ai_compliance":    "AI合规学习",
 }
-DEPT_OPTIONS = ["市场部","销售部","产品部","学管部","管理层"]
-FEEDBACK_TYPES = ["产品问题","销售异议","客户需求变化","后端交付风险",
+DEPT_OPTIONS = ["推广部","顾问","学管","后台","管理层"]
+FEEDBACK_TYPES = ["后台问题","顾问异议","客户需求变化","学管交付风险",
                   "老师资源紧张","学校课程难度变化","价格问题","售后问题","其他"]
-SUGGESTION_TYPES = ["产品优化","市场机会","销售策略","推广策略",
+SUGGESTION_TYPES = ["后台维护","增长机会","顾问策略","推广策略",
                     "风控提醒","资源配置","新产品机会"]
 URGENCY_OPTIONS = ["低","中","高","紧急"]
 PRIORITY_OPTIONS = ["低","中","高","紧急"]
@@ -1207,16 +1207,16 @@ elif page == "📈 产品推广策略台":
     with _tab_dept:
         st.subheader("🏢 本周各部门动作")
 
-        _dept_names = ["市场部", "销售部", "产品部", "学管部", "管理层"]
-        _dept_icons = {"市场部": "📣", "销售部": "💼", "产品部": "📦", "学管部": "👩‍🏫", "管理层": "🏆"}
+        _dept_names = ["推广部", "顾问", "学管", "后台", "管理层"]
+        _dept_icons = {"推广部": "📣", "顾问": "💼", "后台": "📦", "学管": "👩‍🏫", "管理层": "🏆"}
         _dept_actions_map = {
             _da.get("department", ""): _da.get("actions", [])
             for _da in _supply_data.get("department_actions", [])
         }
 
-        # 市场部 + 销售部 并排
+        # 推广部 + 顾问 并排
         _dc1, _dc2 = st.columns(2)
-        for _dept, _col in [("市场部", _dc1), ("销售部", _dc2)]:
+        for _dept, _col in [("推广部", _dc1), ("顾问", _dc2)]:
             with _col:
                 with st.container(border=True):
                     st.markdown(f"#### {_dept_icons.get(_dept,'')} {_dept}")
@@ -1227,9 +1227,9 @@ elif page == "📈 产品推广策略台":
                     else:
                         st.caption("暂无动作建议，请先运行供给分析。")
 
-        # 产品部（重点展示）
+        # 学管（重点展示，因为涉及交付风险判断）
         with st.container(border=True):
-            st.markdown("#### 📦 产品部（核心：推广边界 + 老师储备 + 订单风险）")
+            st.markdown("#### 👩‍🏫 学管（核心：推广边界判断 + 老师储备 + 订单风险反馈）")
             _p_c1, _p_c2, _p_c3, _p_c4 = st.columns(4)
 
             # 订单分布
@@ -1276,25 +1276,25 @@ elif page == "📈 产品推广策略台":
                 else:
                     st.caption("暂无推广边界数据")
 
-            # 产品部建议动作
-            _pd_actions = _dept_actions_map.get("产品部", _dept_actions_map.get("管理层", []))
+            # 学管建议动作
+            _pd_actions = _dept_actions_map.get("学管", _dept_actions_map.get("管理层", []))
             if _pd_actions:
                 st.markdown("**本周建议动作：**")
                 for _act in _pd_actions:
                     st.markdown(f"- {_act}")
 
-        # 学管部 + 管理层 并排
+        # 后台 + 管理层 并排
         _dc3, _dc4 = st.columns(2)
-        for _dept2, _col2 in [("学管部", _dc3), ("管理层", _dc4)]:
+        for _dept2, _col2 in [("后台", _dc3), ("管理层", _dc4)]:
             with _col2:
                 with st.container(border=True):
                     st.markdown(f"#### {_dept_icons.get(_dept2,'')} {_dept2}")
                     _actions2 = _dept_actions_map.get(_dept2, [])
-                    if _dept2 == "学管部" and not _actions2:
+                    if _dept2 == "后台" and not _actions2:
                         _actions2 = [
-                            "反馈本周各学科老师可接单数量",
-                            "标记高风险订单（DDL 48小时内、计算类复杂考试）",
-                            "更新不可承诺话术清单",
+                            "补充本周主推产品话术和卖点资料",
+                            "更新风控边界说明（哪些产品谨慎推）",
+                            "维护学校/产品基础数据",
                         ]
                     if _actions2:
                         for _act2 in _actions2:
@@ -1920,8 +1920,8 @@ elif page in ("💼 顾问作战台", "💼 销售作战台"):
                                 if st.form_submit_button("✅ 提交反馈", type="primary"):
                                     save_content_usage({
                                         "content_id":     _item["id"],
-                                        "used_by":        _u_nm or "销售",
-                                        "department":     "销售部",
+                                        "used_by":        _u_nm or "顾问",
+                                        "department":     "顾问",
                                         "channel":        _u_ch,
                                         "customer_stage": "跟进中",
                                         "result":         _u_res,
@@ -1958,9 +1958,9 @@ elif page in ("💼 顾问作战台", "💼 销售作战台"):
             if st.form_submit_button("📤 提交客户反馈", type="primary"):
                 if _fb_content.strip():
                     save_feedback({
-                        "title":         f"{_fb_name or '销售'} · {_fb_school or '未知学校'} · {_fb_product}",
-                        "department":    "销售部",
-                        "feedback_type": "销售异议",
+                        "title":         f"{_fb_name or '顾问'} · {_fb_school or '未知学校'} · {_fb_product}",
+                        "department":    "顾问",
+                        "feedback_type": "顾问异议",
                         "content":       _fb_content + (f"\n未成交原因：{_fb_reason}" if _fb_reason else ""),
                         "urgency":       "中",
                         "source":        _fb_name or "销售",
@@ -1978,7 +1978,7 @@ elif page in ("💼 顾问作战台", "💼 销售作战台"):
 # ══════════════════════════════════════════════
 elif page == "🗣️ 产品反馈台":
     st.title("🗣️ 产品反馈台")
-    st.caption("产品部 / 学管部 / 销售部 提交业务反馈，驱动产品优化和战略调整")
+    st.caption("后台 / 学管 / 顾问 提交业务反馈，驱动后台资料更新和战略调整")
 
     # ── 新增反馈表单 ──
     with st.expander("➕ 新增反馈", expanded=False):
@@ -2090,7 +2090,7 @@ elif page == "🧭 战略建议台":
             sg_rec     = st.text_area("建议动作", height=80, placeholder="具体要做什么？谁来做？")
             sc6, sc7   = st.columns(2)
             sg_pri     = sc6.selectbox("优先级", PRIORITY_OPTIONS, index=1)
-            sg_source  = sc7.selectbox("来源", ["管理层","AI生成","销售反馈","产品部","学管部","外部调研"])
+            sg_source  = sc7.selectbox("来源", ["管理层","AI生成","顾问反馈","后台","学管","外部调研"])
             sg_submit  = st.form_submit_button("📩 提交建议", type="primary")
 
             if sg_submit:

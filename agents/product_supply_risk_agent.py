@@ -123,7 +123,7 @@ class ProductSupplyRiskAgent:
                 "can_push":             push_level not in ("pause",),
                 "push_level":           push_level,
                 "reason":               reason,
-                "sales_note":           f"{'不得超过后端交付能力，' if tight_subjects else ''}使用标准话术",
+                "sales_note":           f"{'需学管确认交付能力，' if tight_subjects else ''}使用标准话术",
                 "marketing_note":       f"{'不建议大范围投放，' if push_level in ('cautious','pause') else ''}内容主题聚焦真实卖点",
                 "academic_support_note":f"{'需先评估老师档期' if tight_subjects else '资源充足可直接接单'}",
                 "tight_subjects":       tight_subjects,
@@ -204,7 +204,7 @@ class ProductSupplyRiskAgent:
                 ],
             },
             {
-                "department": "学管部",
+                "department": "学管",
                 "actions": [
                     "反馈本周各学科老师可接单数量",
                     "标记高风险订单（DDL 48小时内、计算类复杂考试）",

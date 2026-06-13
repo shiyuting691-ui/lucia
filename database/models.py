@@ -156,7 +156,7 @@ class Content(Base):
 # 执行任务表（V2 升级版）
 # ─────────────────────────────────────────
 TASK_STATUS = ("todo", "doing", "done", "delayed", "blocked", "cancelled")
-TASK_TYPES  = ("内容发布", "销售跟进", "产品优化", "后端反馈",
+TASK_TYPES  = ("内容发布", "顾问跟进", "后台维护", "学管反馈",
                "风控审核", "管理层决策", "数据复盘", "客户跟进")
 
 class Task(Base):
@@ -166,7 +166,7 @@ class Task(Base):
     title               = Column(String(200), nullable=False)
     description         = Column(Text)
     task_type           = Column(String(50))
-    department          = Column(String(50))        # 市场部/销售部/产品部/学管部/管理层
+    department          = Column(String(50))        # 推广部/顾问/学管/后台/管理层
     owner               = Column(String(100))       # 负责人
     priority            = Column(String(20), default="中")  # 低/中/高/紧急
     task_source         = Column(String(50))        # AI生成/手动/系统调度
@@ -238,7 +238,7 @@ class KnowledgeDoc(Base):
 # 部门反馈表
 # ─────────────────────────────────────────
 FEEDBACK_TYPES = (
-    "产品问题", "销售异议", "客户需求变化", "后端交付风险",
+    "后台问题", "顾问异议", "客户需求变化", "学管交付风险",
     "老师资源紧张", "学校课程难度变化", "价格问题", "售后问题", "其他"
 )
 URGENCY_LEVELS = ("低", "中", "高", "紧急")
@@ -248,7 +248,7 @@ class DepartmentFeedback(Base):
     __tablename__ = "department_feedback"
 
     id              = Column(Integer, primary_key=True, autoincrement=True)
-    department      = Column(String(50), nullable=False)  # 市场部/销售部/产品部/学管部/管理层
+    department      = Column(String(50), nullable=False)  # 推广部/顾问/学管/后台/管理层
     feedback_type   = Column(String(50))
     related_product = Column(String(100))
     related_school  = Column(String(100))
@@ -265,7 +265,7 @@ class DepartmentFeedback(Base):
 # 战略建议表
 # ─────────────────────────────────────────
 SUGGESTION_TYPES = (
-    "产品优化", "市场机会", "销售策略", "推广策略",
+    "后台维护", "增长机会", "顾问策略", "推广策略",
     "风控提醒", "资源配置", "新产品机会"
 )
 SUGGESTION_PRIORITY = ("低", "中", "高", "紧急")
@@ -375,7 +375,7 @@ class SchoolCalendar(Base):
 # ─────────────────────────────────────────
 SIGNAL_TYPES = (
     "咨询量上升", "订单量上升", "DDL集中", "产品转化下降",
-    "学校需求升温", "AI问题高发", "价格异议增加", "后端交付风险增加",
+    "学校需求升温", "AI问题高发", "价格异议增加", "学管交付风险增加",
 )
 
 class MarketSignal(Base):

@@ -146,9 +146,9 @@ class PlanningAgent:
   "referral_trigger_this_week": "本周转介绍触发话术或时机",
   "data_to_watch": ["需要关注的数据指标1", "指标2"],
   "team_focus": {{
-    "xueguan": "学管部本周重点动作",
-    "consultant": "顾问部本周重点动作",
-    "operation": "运营本周重点动作"
+    "xueguan": "学管本周重点动作（线索承接/老师资源/交付风险）",
+    "consultant": "顾问本周重点动作（获客跟进/报价推进/老客维护）",
+    "operation": "推广部本周重点动作（素材方向/发布节奏/内容放大）"
   }}
 }}
 """
@@ -245,9 +245,9 @@ class PlanningAgent:
         # 消息3：分部门分工
         msg3 = "👥 本周分部门分工\n\n"
         tf = plan.get('team_focus', {})
-        msg3 += f"📚 学管部：\n{tf.get('xueguan', '')}\n\n"
-        msg3 += f"💼 顾问部：\n{tf.get('consultant', '')}\n\n"
-        msg3 += f"📱 运营：\n{tf.get('operation', '')}\n\n"
+        msg3 += f"📚 学管：\n{tf.get('xueguan', '')}\n\n"
+        msg3 += f"💼 顾问：\n{tf.get('consultant', '')}\n\n"
+        msg3 += f"📱 推广部：\n{tf.get('operation', '')}\n\n"
         msg3 += f"🔄 本周转介绍触发点：\n{plan.get('referral_trigger_this_week', '')}\n\n"
         msg3 += f"📈 本周重点监控数据：\n"
         for d in plan.get('data_to_watch', []):

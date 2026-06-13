@@ -1025,7 +1025,7 @@ def main():
                 continue
             save_task({
                 "title": f"【{s['priority_level']}级】{s['school_name']} 本周推广跟进",
-                "department": "市场部", "priority": "高" if s["priority_level"] == "S" else "中",
+                "department": "推广部", "priority": "高" if s["priority_level"] == "S" else "中",
                 "task_source": "AI生成", "task_type": "内容发布",
                 "related_school": s["school_name"],
                 "description": f"学校机会分{s['opportunity_score']}，当前阶段：{s['current_stage']}，主推：{'、'.join(s['hot_products'][:2])}",
