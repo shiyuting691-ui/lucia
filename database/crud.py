@@ -9,7 +9,8 @@ from sqlalchemy import select, desc
 from .models import (Content, Campaign, Task, KnowledgeDoc, Product, School,
                      DepartmentFeedback, StrategySuggestion, ContentUsage, WorkflowRun,
                      CompanyFact, BusinessDictionaryTerm,
-                     SchoolScore, SchoolStrategyCard)
+                     SchoolScore, SchoolStrategyCard,
+                     OpportunityScore, LeadScore, CampaignPrediction, WeeklyReview)
 from .db import get_session
 
 
@@ -1646,3 +1647,285 @@ def list_agent_feedbacks(agent_name: str = None, limit: int = 100) -> List[dict]
             "hallucination_flag": r.hallucination_flag, "feedback_text": r.feedback_text,
             "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
         } for r in s.execute(q.limit(limit)).scalars()]
+
+
+# ══════════════════════════════════════════════════════════════════
+# V9 — 机会评分 / 线索评分 / 广告预测 / 周复盘
+# ══════════════════════════════════════════════════════════════════
+from .models import OpportunityScore, LeadScore, CampaignPrediction, WeeklyReview
+
+
+# ── 机会评分（opportunity_scores）────────────────────────────────
+def _opp_to_dict(r: OpportunityScore) -> dict:
+    return {
+        "id": r.id, "score_type": r.score_type, "entity_name": r.entity_name,
+        "entity_id": r.entity_id, "score": r.score, "level": r.level,
+        "traffic_light": r.traffic_light,
+        "score_breakdown": r.score_breakdown or {},
+        "score_reason": r.score_reason or [],
+        "risk_flags": r.risk_flags or [],
+        "recommendation": r.recommendation,
+        "data_anchored": r.data_anchored,
+        "anchor_note": r.anchor_note,
+        "scored_at": r.scored_at.isoformat() if r.scored_at else None,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def save_opportunity_score(data: dict) -> int:
+    """按 score_type + entity_name upsert"""
+    with get_session() as s:
+        row = s.execute(select(OpportunityScore).where(
+            OpportunityScore.score_type == data["score_type"],
+            OpportunityScore.entity_name == data["entity_name"],
+        )).scalar_one_or_none()
+        if row is None:
+            row = OpportunityScore(
+                score_type=data["score_type"], entity_name=data["entity_name"])
+            s.add(row)
+        for k in ("entity_id", "score", "level", "traffic_light", "score_breakdown",
+                  "score_reason", "risk_flags", "recommendation",
+                  "data_anchored", "anchor_note"):
+            if k in data:
+                setattr(row, k, data[k])
+        row.scored_at = datetime.utcnow()
+        s.flush()
+        return row.id
+
+
+def list_opportunity_scores(score_type: str = None, level: str = None,
+                             traffic_light: str = None, limit: int = 100) -> List[dict]:
+    with get_session() as s:
+        q = select(OpportunityScore).order_by(desc(OpportunityScore.score))
+        if score_type:
+            q = q.where(OpportunityScore.score_type == score_type)
+        if level:
+            q = q.where(OpportunityScore.level == level)
+        if traffic_light:
+            q = q.where(OpportunityScore.traffic_light == traffic_light)
+        return [_opp_to_dict(r) for r in s.execute(q.limit(limit)).scalars()]
+
+
+def get_opportunity_score(score_type: str, entity_name: str) -> Optional[dict]:
+    with get_session() as s:
+        row = s.execute(select(OpportunityScore).where(
+            OpportunityScore.score_type == score_type,
+            OpportunityScore.entity_name == entity_name,
+        )).scalar_one_or_none()
+        return _opp_to_dict(row) if row else None
+
+
+# ── 线索评分（lead_scores）───────────────────────────────────────
+def _lead_score_to_dict(r: LeadScore) -> dict:
+    return {
+        "id": r.id, "lead_id": r.lead_id, "customer_name": r.customer_name,
+        "school": r.school, "product_interest": r.product_interest,
+        "score": r.score, "level": r.level,
+        "score_reason": r.score_reason or [],
+        "urgent_flags": r.urgent_flags or [],
+        "suggested_action": r.suggested_action,
+        "scored_at": r.scored_at.isoformat() if r.scored_at else None,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def save_lead_score(data: dict) -> int:
+    """按 lead_id upsert"""
+    with get_session() as s:
+        row = s.execute(select(LeadScore).where(
+            LeadScore.lead_id == data["lead_id"]
+        )).scalar_one_or_none()
+        if row is None:
+            row = LeadScore(lead_id=data["lead_id"])
+            s.add(row)
+        for k in ("customer_name", "school", "product_interest", "score", "level",
+                  "score_reason", "urgent_flags", "suggested_action"):
+            if k in data:
+                setattr(row, k, data[k])
+        row.scored_at = datetime.utcnow()
+        s.flush()
+        return row.id
+
+
+def list_lead_scores(level: str = None, school: str = None,
+                     limit: int = 100) -> List[dict]:
+    with get_session() as s:
+        q = select(LeadScore).order_by(desc(LeadScore.score))
+        if level:
+            q = q.where(LeadScore.level == level)
+        if school:
+            q = q.where(LeadScore.school == school)
+        return [_lead_score_to_dict(r) for r in s.execute(q.limit(limit)).scalars()]
+
+
+# ── 广告预测（campaign_predictions）─────────────────────────────
+def _pred_to_dict(r: CampaignPrediction) -> dict:
+    return {
+        "id": r.id, "prediction_week": r.prediction_week,
+        "school": r.school, "product": r.product, "channel": r.channel,
+        "hook_theme": r.hook_theme,
+        "predicted_leads_low": r.predicted_leads_low,
+        "predicted_leads_high": r.predicted_leads_high,
+        "confidence": r.confidence, "confidence_note": r.confidence_note,
+        "basis": r.basis, "school_score": r.school_score,
+        "product_score": r.product_score,
+        "historical_leads": r.historical_leads,
+        "rationale": r.rationale,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def save_campaign_prediction(data: dict) -> int:
+    with get_session() as s:
+        row = CampaignPrediction(
+            prediction_week      = data["prediction_week"],
+            school               = data.get("school", ""),
+            product              = data.get("product", ""),
+            channel              = data.get("channel", ""),
+            hook_theme           = data.get("hook_theme", ""),
+            predicted_leads_low  = int(data.get("predicted_leads_low", 0)),
+            predicted_leads_high = int(data.get("predicted_leads_high", 0)),
+            confidence           = data.get("confidence", "low"),
+            confidence_note      = data.get("confidence_note", ""),
+            basis                = data.get("basis", "rule_only"),
+            school_score         = data.get("school_score"),
+            product_score        = data.get("product_score"),
+            historical_leads     = data.get("historical_leads"),
+            rationale            = data.get("rationale", ""),
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_campaign_predictions(week: str = None, school: str = None,
+                               product: str = None, limit: int = 100) -> List[dict]:
+    with get_session() as s:
+        q = select(CampaignPrediction).order_by(desc(CampaignPrediction.created_at))
+        if week:
+            q = q.where(CampaignPrediction.prediction_week == week)
+        if school:
+            q = q.where(CampaignPrediction.school == school)
+        if product:
+            q = q.where(CampaignPrediction.product == product)
+        return [_pred_to_dict(r) for r in s.execute(q.limit(limit)).scalars()]
+
+
+# ── 周复盘（weekly_reviews）─────────────────────────────────────
+def _review_to_dict(r: WeeklyReview) -> dict:
+    return {
+        "id": r.id, "review_week": r.review_week,
+        "total_leads_predicted": r.total_leads_predicted,
+        "total_leads_actual": r.total_leads_actual,
+        "total_orders_predicted": r.total_orders_predicted,
+        "total_orders_actual": r.total_orders_actual,
+        "school_breakdown": r.school_breakdown or [],
+        "product_breakdown": r.product_breakdown or [],
+        "tasks_total": r.tasks_total, "tasks_done": r.tasks_done,
+        "tasks_delayed": r.tasks_delayed, "tasks_blocked": r.tasks_blocked,
+        "dept_completion": r.dept_completion or {},
+        "key_wins": r.key_wins or [],
+        "key_misses": r.key_misses or [],
+        "root_causes": r.root_causes or [],
+        "next_week_focus": r.next_week_focus or [],
+        "review_summary": r.review_summary,
+        "generated_by": r.generated_by,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def save_weekly_review(data: dict) -> int:
+    """按 review_week upsert：每周只保留最新一份复盘"""
+    with get_session() as s:
+        row = s.execute(select(WeeklyReview).where(
+            WeeklyReview.review_week == data["review_week"]
+        )).scalar_one_or_none()
+        if row is None:
+            row = WeeklyReview(review_week=data["review_week"])
+            s.add(row)
+        for k in ("total_leads_predicted", "total_leads_actual",
+                  "total_orders_predicted", "total_orders_actual",
+                  "school_breakdown", "product_breakdown",
+                  "tasks_total", "tasks_done", "tasks_delayed", "tasks_blocked",
+                  "dept_completion", "key_wins", "key_misses",
+                  "root_causes", "next_week_focus", "review_summary", "generated_by"):
+            if k in data:
+                setattr(row, k, data[k])
+        s.flush()
+        return row.id
+
+
+def list_weekly_reviews(limit: int = 12) -> List[dict]:
+    with get_session() as s:
+        q = select(WeeklyReview).order_by(desc(WeeklyReview.review_week))
+        return [_review_to_dict(r) for r in s.execute(q.limit(limit)).scalars()]
+
+
+def get_weekly_review(week: str) -> Optional[dict]:
+    with get_session() as s:
+        row = s.execute(select(WeeklyReview).where(
+            WeeklyReview.review_week == week
+        )).scalar_one_or_none()
+        return _review_to_dict(row) if row else None
+
+
+# ── tasks 扩展字段更新（V9）──────────────────────────────────────
+def update_task_extended(task_id: int, status: str = None, completion_result: str = None,
+                          blockers: str = None, notes: str = None) -> bool:
+    """更新 tasks 的新增字段：status / completion_result / blockers"""
+    with get_session() as s:
+        t = s.get(Task, task_id)
+        if not t:
+            return False
+        if status:
+            t.status = status
+            if status == "done":
+                t.completed_at = datetime.utcnow()
+        if completion_result is not None:
+            t.completion_result = completion_result
+        if blockers is not None:
+            t.blockers = blockers
+        if notes:
+            t.notes = (t.notes or "") + f"\n[{datetime.utcnow().strftime('%m/%d %H:%M')}] {notes}"
+        t.updated_at = datetime.utcnow()
+        return True
+
+
+def get_task_execution_stats(week_start: str = None) -> dict:
+    """按部门统计任务完成情况，用于执行监督台和周复盘"""
+    from datetime import timedelta
+    from sqlalchemy import func
+    with get_session() as s:
+        q = select(Task)
+        if week_start:
+            try:
+                ws = datetime.strptime(week_start, "%Y-%m-%d")
+                we = ws + timedelta(days=7)
+                q = q.where(Task.created_at >= ws, Task.created_at < we)
+            except ValueError:
+                pass
+        rows = s.execute(q).scalars().all()
+        total = len(rows)
+        done = sum(1 for r in rows if r.status == "done")
+        delayed = sum(1 for r in rows if r.status == "delayed")
+        blocked = sum(1 for r in rows if r.status == "blocked")
+        dept: dict = {}
+        for r in rows:
+            d = r.department or "未分配"
+            if d not in dept:
+                dept[d] = {"total": 0, "done": 0, "delayed": 0, "blocked": 0}
+            dept[d]["total"] += 1
+            if r.status == "done":
+                dept[d]["done"] += 1
+            elif r.status == "delayed":
+                dept[d]["delayed"] += 1
+            elif r.status == "blocked":
+                dept[d]["blocked"] += 1
+        for d in dept:
+            t = dept[d]["total"]
+            dept[d]["completion_rate"] = round(dept[d]["done"] / t, 2) if t else 0
+        return {
+            "total": total, "done": done, "delayed": delayed, "blocked": blocked,
+            "completion_rate": round(done / total, 2) if total else 0,
+            "by_dept": dept,
+        }

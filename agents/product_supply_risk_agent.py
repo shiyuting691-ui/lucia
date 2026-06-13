@@ -13,7 +13,7 @@ import anthropic
 
 from database import (
     list_orders, list_teacher_capacity, list_order_risks,
-    list_market_signals, save_suggestion,
+    list_market_signals, save_suggestion, save_opportunity_score,
 )
 
 # 加载知识库
@@ -245,4 +245,31 @@ class ProductSupplyRiskAgent:
         )
 
         logger.info(f"[ProductSupplyRiskAgent] analysis done, saved as suggestion")
+
+        # 将每个产品的推广等级写入 opportunity_scores（score_type=product）
+        push_score_map = {"strong": 85, "normal": 60, "cautious": 35, "pause": 10}
+        traffic_map    = {"strong": "green", "normal": "yellow", "cautious": "yellow", "pause": "red"}
+        level_map      = {"strong": "A", "normal": "B", "cautious": "C", "pause": "低机会"}
+        for b in promotion_boundary:
+            pid  = b.get("product_id", "")
+            name = b.get("product", pid)
+            pl   = b.get("push_level", "normal")
+            # 订单量加权：strong+订单≥20 升到 S
+            vol  = product_counter.get(pid, 0)
+            raw  = push_score_map.get(pl, 60)
+            bonus = min(15, vol // 2)
+            total_score = min(100, raw + bonus)
+            lv = "S" if total_score >= 85 else level_map.get(pl, "B")
+            save_opportunity_score({
+                "score_type":    "product",
+                "entity_name":   name,
+                "entity_id":     pid,
+                "score":         total_score,
+                "level":         lv,
+                "traffic_light": traffic_map.get(pl, "yellow"),
+                "score_reason":  [b.get("reason", ""), f"近{period_days}天订单{vol}单"],
+                "risk_flags":    [f"{s}老师紧张" for s in b.get("tight_subjects", [])],
+                "recommendation":b.get("sales_note", ""),
+            })
+
         return result

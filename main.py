@@ -985,6 +985,89 @@ def main():
                 print(f"  ❌ {c.get('school_name','?')}: {c['error']}")
         print(f"\n✅ 生成 {len(ok)} 张策略卡，写入 school_strategy_cards 表")
 
+    # ── V9 新增命令 ──────────────────────────────────────────────
+
+    elif cmd == "update-opportunity-scores":
+        print("\n📊 更新全类型机会评分（学校+产品+线索）...")
+        from agents.school_opportunity_scoring_agent import SchoolOpportunityScoringAgent
+        from agents.product_supply_risk_agent import ProductSupplyRiskAgent
+        from agents.lead_opportunity_scoring_agent import LeadOpportunityScoringAgent
+        sr = SchoolOpportunityScoringAgent(config).run(top_n=20)
+        ProductSupplyRiskAgent(config).analyze(period_days=14)
+        lr = LeadOpportunityScoringAgent(config).run(days_lookback=14)
+        print(f"✅ 学校评分{len(sr)}所，线索评分{len(lr)}条，产品评分已写入 opportunity_scores")
+
+    elif cmd == "predict-campaigns":
+        week_start = None
+        for a in args:
+            if a.startswith("--week="):
+                week_start = a[7:]
+            elif a.startswith("--week"):
+                idx = args.index(a)
+                if idx + 1 < len(args):
+                    week_start = args[idx + 1]
+        print(f"\n🎯 生成广告预测（周：{week_start or '本周'}）...")
+        from agents.campaign_prediction_agent import CampaignPredictionAgent
+        preds = CampaignPredictionAgent(config).run(week_start=week_start, top_schools=5, top_products=3)
+        for p in preds[:10]:
+            print(f"  {p['school']} × {p['product']} × {p['channel']}: "
+                  f"{p['predicted_leads_low']}–{p['predicted_leads_high']} 条（{p['confidence']}）")
+        print(f"✅ 生成 {len(preds)} 条预测，写入 campaign_predictions 表")
+
+    elif cmd == "generate-execution-tasks":
+        print("\n✅ 从本周策略生成执行任务（基于学校策略卡 + 供给分析）...")
+        from agents.school_opportunity_scoring_agent import SchoolOpportunityScoringAgent
+        from database import save_task
+        scores = SchoolOpportunityScoringAgent(config).run(top_n=10)
+        created = 0
+        for s in scores:
+            if s["priority_level"] not in ("S", "A"):
+                continue
+            save_task({
+                "title": f"【{s['priority_level']}级】{s['school_name']} 本周推广跟进",
+                "department": "市场部", "priority": "高" if s["priority_level"] == "S" else "中",
+                "task_source": "AI生成", "task_type": "内容发布",
+                "related_school": s["school_name"],
+                "description": f"学校机会分{s['opportunity_score']}，当前阶段：{s['current_stage']}，主推：{'、'.join(s['hot_products'][:2])}",
+            })
+            created += 1
+        print(f"✅ 已生成 {created} 条执行任务，写入 tasks 表")
+
+    elif cmd == "run-daily-execution-check":
+        print("\n🔔 运行每日执行监督工作流...")
+        from workflows.daily_execution import DailyExecutionWorkflow
+        result = DailyExecutionWorkflow(config).run()
+        print(f"✅ {result.get('summary','完成')}")
+
+    elif cmd == "run-weekly-review":
+        week_start = None
+        for a in args:
+            if a.startswith("--week="):
+                week_start = a[7:]
+            elif a == "--week" and args.index(a) + 1 < len(args):
+                week_start = args[args.index(a) + 1]
+        if not week_start:
+            from datetime import timedelta
+            today = datetime.now()
+            week_start = (today - timedelta(days=today.weekday() + 7)).strftime("%Y-%m-%d")
+        print(f"\n🔁 生成周复盘（{week_start}）...")
+        from agents.weekly_review_agent import WeeklyReviewAgent
+        rv = WeeklyReviewAgent(config).run(week_start=week_start)
+        print(f"✅ 复盘已生成：{rv.get('review_summary','')[:100]}")
+        print(f"  任务完成：{rv.get('tasks_done',0)}/{rv.get('tasks_total',0)}")
+
+    elif cmd == "run-weekly-growth":
+        week_start = None
+        for a in args:
+            if a.startswith("--week="):
+                week_start = a[7:]
+            elif a == "--week" and args.index(a) + 1 < len(args):
+                week_start = args[args.index(a) + 1]
+        print(f"\n🚀 运行每周增长管理工作流（{week_start or '本周'}）...")
+        from workflows.weekly_growth import WeeklyGrowthWorkflow
+        result = WeeklyGrowthWorkflow(config, week_start=week_start).run()
+        print(f"✅ {result.get('summary','完成')}")
+
     elif cmd == "health-check":
         import sys as _sys
         ok = True

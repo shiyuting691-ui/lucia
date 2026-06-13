@@ -36,6 +36,12 @@ from database import (
     # V7 学校增长情报
     list_school_scores, get_strategy_card, list_strategy_cards,
     save_content,
+    # V9 增长管理
+    list_opportunity_scores, list_lead_scores, list_campaign_predictions,
+    list_weekly_reviews, get_weekly_review,
+    update_task_extended, get_task_execution_stats,
+    save_agent_run, list_agent_runs, get_agent_last_runs,
+    save_agent_feedback, list_agent_feedbacks,
 )
 from database.models import TASK_TYPES
 
@@ -400,31 +406,20 @@ with st.sidebar:
     </div>""", unsafe_allow_html=True)
     st.caption(f"📅 {datetime.now().strftime('%Y-%m-%d')}")
     st.divider()
-    st.markdown('<div style="font-size:11px;color:#475569;font-weight:600;letter-spacing:1px;padding:4px 0 6px 2px">核心页面</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:11px;color:#475569;font-weight:600;letter-spacing:1px;padding:4px 0 6px 2px">增长管理</div>', unsafe_allow_html=True)
     page = st.radio("", [
-        "📊 公司增长看板",
+        "📊 老板驾驶舱",
         "🏫 学校增长情报台",
-        "📈 产品推广策略台",
-        "📝 内容池",
-        "💼 销售作战台",
-        "📁 资料上传中心",
+        "🎯 广告预测台",
+        "💼 顾问作战台",
+        "📝 推广素材台",
+        "✅ 执行监督台",
+        "📁 数据资料中心",
+        "🔁 周复盘台",
+        "🛠 Agent管理中心",
     ], label_visibility="collapsed")
-    with st.expander("🧰 更多工具"):
-        _more = st.radio("", [
-            "（收起）",
-            "📚 公司资料学习中心",
-            "📡 市场情报台",
-            "📅 营销日历",
-            "✅ 部门任务台",
-            "🗣️ 产品反馈台",
-            "🧭 战略建议台",
-            "🤖 自动化工作流",
-            "🛠 Agent管理中心",
-        ], label_visibility="collapsed", key="more_tools")
-    if _more != "（收起）":
-        page = _more
     st.divider()
-    st.caption("v4.0 · 增长作战系统")
+    st.caption("v9.0 · 增长管理系统")
 
 
 # ══════════════════════════════════════════════
@@ -1378,7 +1373,7 @@ elif page == "📈 产品推广策略台":
 # ══════════════════════════════════════════════
 # 页面 1：公司增长看板
 # ══════════════════════════════════════════════
-elif page == "📊 公司增长看板":
+elif page in ("📊 老板驾驶舱", "📊 公司增长看板"):
     # ── 数据加载 ────────────────────────────
     _dash_stats   = get_dashboard_stats()
     _task_stats   = get_task_stats()
@@ -1626,7 +1621,7 @@ elif page == "📅 营销日历":
 # ══════════════════════════════════════════════
 # 页面 3：内容池
 # ══════════════════════════════════════════════
-elif page == "📝 内容池":
+elif page in ("📝 推广素材台", "📝 内容池"):
     # ── 数据 ────────────────────────────────
     _all_contents = list_contents(limit=500)
     _cnt_draft    = sum(1 for c in _all_contents if c["status"] == "draft")
@@ -1777,7 +1772,7 @@ elif page == "📝 内容池":
 # ══════════════════════════════════════════════
 # 页面 4：销售作战台
 # ══════════════════════════════════════════════
-elif page == "💼 销售作战台":
+elif page in ("💼 顾问作战台", "💼 销售作战台"):
     # ── 数据 ────────────────────────────────
     _approved_all = list_contents(status="approved", limit=200)
     _used_all     = list_contents(status="used", limit=100)
@@ -2400,7 +2395,7 @@ elif page == "🤖 自动化工作流":
 # ══════════════════════════════════════════════
 # 页面：资料上传中心
 # ══════════════════════════════════════════════
-elif page == "📁 资料上传中心":
+elif page in ("📁 数据资料中心", "📁 资料上传中心"):
     import subprocess, os, shutil
     from database import (
         save_knowledge_doc, list_knowledge_docs, get_knowledge_stats,
@@ -3139,3 +3134,328 @@ elif page == "📚 公司资料学习中心":
                 update_fact_status(int(_revoke_id), "pending", is_active=False)
                 st.warning(f"已撤销事实 #{_revoke_id}")
                 st.rerun()
+
+
+# ══════════════════════════════════════════════
+# 页面：广告预测台
+# ══════════════════════════════════════════════
+elif page == "🎯 广告预测台":
+    render_hero("🎯 广告预测台", "基于学校评分 × 产品评分 × 历史数据的咨询量预测区间")
+
+    _preds = list_campaign_predictions(limit=200)
+    _opp_school  = {o["entity_name"]: o for o in list_opportunity_scores(score_type="school")}
+    _opp_product = {o["entity_name"]: o for o in list_opportunity_scores(score_type="product")}
+
+    # ── 顶部操作区 ──
+    _pc = st.columns([2, 2, 1, 1])
+    _week_input = _pc[0].text_input("预测周", value=datetime.now().strftime("%Y-%m-%d"),
+                                    help="格式 YYYY-MM-DD，填写周一日期")
+    _run_pred = _pc[3].button("▶ 生成本周预测", type="primary")
+
+    if _run_pred:
+        with st.spinner("正在生成预测（规则计算 + Claude 生成推广钩子）..."):
+            try:
+                from agents.campaign_prediction_agent import CampaignPredictionAgent
+                import yaml
+                with open(ROOT / "config.yaml") as _f:
+                    _cfg = yaml.safe_load(_f)
+                _agent = CampaignPredictionAgent(_cfg)
+                _new_preds = _agent.run(week_start=_week_input, top_schools=5, top_products=3)
+                st.success(f"已生成 {len(_new_preds)} 条预测，刷新页面查看。")
+                st.rerun()
+            except Exception as _e:
+                st.error(f"生成失败：{_e}")
+
+    if not _preds:
+        st.info("暂无预测数据。请先运行学校评分 + 产品评分，再点击 [生成本周预测]。")
+        st.stop()
+
+    # ── 机会评分总览 ──
+    st.subheader("📊 机会评分全景")
+    _oc1, _oc2 = st.columns(2)
+    with _oc1:
+        st.markdown("**学校机会评分**")
+        if _opp_school:
+            _sch_df = pd.DataFrame([{
+                "学校": n, "分数": v["score"], "等级": v["level"],
+                "信号灯": {"green":"🟢","yellow":"🟡","red":"🔴","gray":"⚫"}.get(v["traffic_light"],"⚫"),
+            } for n, v in sorted(_opp_school.items(), key=lambda x: -x[1]["score"])[:10]])
+            st.dataframe(_sch_df, use_container_width=True, hide_index=True)
+        else:
+            st.caption("尚无数据，请先运行学校评分")
+    with _oc2:
+        st.markdown("**产品机会评分**")
+        if _opp_product:
+            _pro_df = pd.DataFrame([{
+                "产品": n, "分数": v["score"], "等级": v["level"],
+                "信号灯": {"green":"🟢","yellow":"🟡","red":"🔴","gray":"⚫"}.get(v["traffic_light"],"⚫"),
+                "风险": "、".join(v.get("risk_flags", [])[:2]),
+            } for n, v in sorted(_opp_product.items(), key=lambda x: -x[1]["score"])[:8]])
+            st.dataframe(_pro_df, use_container_width=True, hide_index=True)
+        else:
+            st.caption("尚无数据，请先运行产品分析")
+
+    st.divider()
+
+    # ── 预测列表 ──
+    st.subheader("📋 广告预测明细")
+    _pf1, _pf2, _pf3 = st.columns(3)
+    _pf_week = _pf1.selectbox("筛选周次", ["全部"] + sorted({p["prediction_week"] for p in _preds}, reverse=True))
+    _pf_school = _pf2.selectbox("筛选学校", ["全部"] + sorted({p["school"] for p in _preds if p["school"]}))
+    _pf_conf = _pf3.selectbox("置信度", ["全部", "high", "medium", "low"])
+
+    _fp = [p for p in _preds
+           if (_pf_week == "全部" or p["prediction_week"] == _pf_week)
+           and (_pf_school == "全部" or p["school"] == _pf_school)
+           and (_pf_conf == "全部" or p["confidence"] == _pf_conf)]
+
+    _CONF_COLOR = {"high": "🟢", "medium": "🟡", "low": "🔴"}
+    for _p in _fp[:30]:
+        with st.expander(
+            f"{_CONF_COLOR.get(_p['confidence'],'⚫')} {_p['school']} × {_p['product']} × {_p['channel']} "
+            f"｜预测 {_p['predicted_leads_low']}–{_p['predicted_leads_high']} 条",
+            expanded=False
+        ):
+            _ec1, _ec2 = st.columns(2)
+            _ec1.metric("区间下限", _p["predicted_leads_low"])
+            _ec2.metric("区间上限", _p["predicted_leads_high"])
+            if _p.get("hook_theme"):
+                st.markdown(f"**推广钩子：** {_p['hook_theme']}")
+            if _p.get("rationale"):
+                st.markdown(f"**推理：** {_p['rationale']}")
+            if _p.get("confidence_note"):
+                st.caption(f"⚠️ {_p['confidence_note']}")
+            _meta = []
+            if _p.get("school_score"): _meta.append(f"学校分{_p['school_score']}")
+            if _p.get("product_score"): _meta.append(f"产品分{_p['product_score']}")
+            if _p.get("historical_leads"): _meta.append(f"历史同期{_p['historical_leads']}条")
+            if _meta:
+                st.caption("数据依据：" + " · ".join(_meta))
+
+
+# ══════════════════════════════════════════════
+# 页面：执行监督台
+# ══════════════════════════════════════════════
+elif page == "✅ 执行监督台":
+    render_hero("✅ 执行监督台", "实时追踪各部门任务执行情况，快速处理阻碍")
+
+    # ── 顶部统计 ──
+    _es = get_task_execution_stats()
+    _em1, _em2, _em3, _em4, _em5 = st.columns(5)
+    render_metric(_em1, _es["total"], "总任务数", color="#6366f1")
+    render_metric(_em2, _es["done"], "已完成",
+                  sub=f"{int(_es['completion_rate']*100)}% 完成率", color="#22c55e")
+    _doing = _es["total"] - _es["done"] - _es["delayed"] - _es["blocked"]
+    render_metric(_em3, max(0, _doing), "进行中", color="#3b82f6")
+    render_metric(_em4, _es["delayed"], "延迟", color="#f59e0b")
+    render_metric(_em5, _es["blocked"], "阻碍", color="#ef4444")
+
+    st.divider()
+
+    # ── 部门完成度 ──
+    st.subheader("📊 部门执行完成度")
+    _dept_data = _es.get("by_dept", {})
+    if _dept_data:
+        _dept_rows = []
+        for _d, _v in _dept_data.items():
+            _dept_rows.append({
+                "部门": _d,
+                "总任务": _v["total"],
+                "已完成": _v["done"],
+                "延迟": _v["delayed"],
+                "阻碍": _v["blocked"],
+                "完成率": f"{int(_v['completion_rate']*100)}%",
+            })
+        st.dataframe(pd.DataFrame(_dept_rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("暂无任务数据")
+
+    st.divider()
+
+    # ── 任务列表（筛选 + 一键更新状态）──
+    st.subheader("📋 任务明细")
+    _tf1, _tf2, _tf3 = st.columns(3)
+    _tf_dept   = _tf1.selectbox("部门", ["全部"] + DEPT_OPTIONS)
+    _tf_status = _tf2.selectbox("状态", ["全部", "todo", "doing", "delayed", "blocked", "done"])
+    _tf_prio   = _tf3.selectbox("优先级", ["全部"] + PRIORITY_OPTIONS)
+
+    _all_tasks = list_tasks(
+        department=None if _tf_dept == "全部" else _tf_dept,
+        status=None if _tf_status == "全部" else _tf_status,
+        priority=None if _tf_prio == "全部" else _tf_prio,
+        limit=200,
+    )
+
+    _STATUS_ICON = {"todo": "⬜", "doing": "🔵", "done": "✅", "delayed": "🟡", "blocked": "🔴", "cancelled": "⚫"}
+    _PRIO_COLOR  = {"紧急": "#ef4444", "高": "#f97316", "中": "#3b82f6", "低": "#6b7280"}
+
+    if not _all_tasks:
+        st.info("暂无任务，可通过工作流自动生成或手动创建。")
+    else:
+        for _t in _all_tasks[:100]:
+            with st.expander(
+                f"{_STATUS_ICON.get(_t['status'],'⬜')} [{_t.get('priority','中')}] "
+                f"{_t['title'][:60]} — {_t.get('department','')}",
+                expanded=(_t["status"] in ("blocked", "delayed")),
+            ):
+                _tc1, _tc2 = st.columns([3, 1])
+                with _tc1:
+                    if _t.get("description"):
+                        st.markdown(_t["description"])
+                    _info = []
+                    if _t.get("related_school"): _info.append(f"学校: {_t['related_school']}")
+                    if _t.get("related_product"): _info.append(f"产品: {_t['related_product']}")
+                    if _t.get("due_date"): _info.append(f"截止: {_t['due_date'][:10]}")
+                    if _t.get("owner"): _info.append(f"负责人: {_t['owner']}")
+                    if _info: st.caption(" · ".join(_info))
+                    if _t.get("blockers"):
+                        st.error(f"🚨 阻碍：{_t['blockers']}")
+                    if _t.get("completion_result"):
+                        st.success(f"✅ 完成结果：{_t['completion_result']}")
+                with _tc2:
+                    _new_status = st.selectbox(
+                        "更新状态", ["todo", "doing", "done", "delayed", "blocked"],
+                        index=["todo","doing","done","delayed","blocked"].index(_t["status"])
+                              if _t["status"] in ["todo","doing","done","delayed","blocked"] else 0,
+                        key=f"status_{_t['id']}")
+                    _blocker_input = ""
+                    _result_input  = ""
+                    if _new_status in ("blocked", "delayed"):
+                        _blocker_input = st.text_area("阻碍原因", key=f"blocker_{_t['id']}", height=60)
+                    if _new_status == "done":
+                        _result_input = st.text_area("完成结果", key=f"result_{_t['id']}", height=60)
+                    if st.button("保存", key=f"save_{_t['id']}"):
+                        update_task_extended(
+                            _t["id"], status=_new_status,
+                            blockers=_blocker_input or None,
+                            completion_result=_result_input or None,
+                        )
+                        st.success("已更新")
+                        st.rerun()
+
+    st.divider()
+
+    # ── 手动新建任务 ──
+    with st.expander("➕ 手动新建任务"):
+        _nc1, _nc2 = st.columns(2)
+        _nt_title  = _nc1.text_input("任务标题", key="nt_title")
+        _nt_dept   = _nc2.selectbox("部门", DEPT_OPTIONS, key="nt_dept")
+        _nt_prio   = _nc1.selectbox("优先级", PRIORITY_OPTIONS, index=1, key="nt_prio")
+        _nt_owner  = _nc2.text_input("负责人", key="nt_owner")
+        _nt_school = _nc1.text_input("关联学校", key="nt_school")
+        _nt_product= _nc2.text_input("关联产品", key="nt_product")
+        _nt_due    = st.date_input("截止日期", key="nt_due")
+        _nt_desc   = st.text_area("任务描述", key="nt_desc", height=80)
+        if st.button("创建任务", type="primary", key="create_task"):
+            if _nt_title:
+                from database import save_task
+                save_task({
+                    "title": _nt_title, "department": _nt_dept,
+                    "priority": _nt_prio, "owner": _nt_owner,
+                    "related_school": _nt_school, "related_product": _nt_product,
+                    "due_date": datetime.combine(_nt_due, datetime.min.time()),
+                    "description": _nt_desc, "task_source": "手动",
+                })
+                st.success("任务已创建")
+                st.rerun()
+            else:
+                st.warning("请填写任务标题")
+
+
+# ══════════════════════════════════════════════
+# 页面：周复盘台
+# ══════════════════════════════════════════════
+elif page == "🔁 周复盘台":
+    render_hero("🔁 周复盘台", "预测 vs 实际对比 · 执行完成度分析 · 归因与下周重点")
+
+    _reviews = list_weekly_reviews(limit=12)
+
+    # ── 生成按钮 ──
+    _rv1, _rv2 = st.columns([3, 1])
+    _rv_week = _rv1.text_input("复盘周次（周一日期）",
+                               value=(datetime.now() - __import__('datetime').timedelta(days=datetime.now().weekday()+7)).strftime("%Y-%m-%d"))
+    if _rv2.button("▶ 生成本周复盘", type="primary"):
+        with st.spinner("正在生成周复盘（Claude 分析归因）..."):
+            try:
+                from agents.weekly_review_agent import WeeklyReviewAgent
+                import yaml
+                with open(ROOT / "config.yaml") as _f:
+                    _cfg = yaml.safe_load(_f)
+                _rev = WeeklyReviewAgent(_cfg).run(week_start=_rv_week)
+                st.success("复盘已生成，刷新查看。")
+                st.rerun()
+            except Exception as _e:
+                st.error(f"生成失败：{_e}")
+
+    if not _reviews:
+        st.info("暂无复盘数据。请先确保有预测和实际订单/咨询数据，再点击生成。")
+        st.stop()
+
+    # ── 选择复盘周 ──
+    _week_options = [r["review_week"] for r in _reviews]
+    _sel_week = st.selectbox("查看哪一周", _week_options)
+    _rv = get_weekly_review(_sel_week)
+    if not _rv:
+        st.info("该周暂无复盘")
+        st.stop()
+
+    st.divider()
+
+    # ── 预测 vs 实际 ──
+    st.subheader("📈 预测 vs 实际")
+    _kc = st.columns(4)
+    render_metric(_kc[0], _rv["total_leads_predicted"], "预测咨询（中位）", color="#6366f1")
+    render_metric(_kc[1], _rv["total_leads_actual"], "实际咨询",
+                  sub=f"差值 {_rv['total_leads_actual'] - _rv['total_leads_predicted']:+d}",
+                  color="#22c55e" if _rv["total_leads_actual"] >= _rv["total_leads_predicted"] else "#ef4444")
+    render_metric(_kc[2], _rv["tasks_done"], "任务完成",
+                  sub=f"共{_rv['tasks_total']}个 · delayed={_rv['tasks_delayed']} blocked={_rv['tasks_blocked']}",
+                  color="#3b82f6")
+    _cr = round(_rv["tasks_done"] / _rv["tasks_total"] * 100) if _rv["tasks_total"] else 0
+    render_metric(_kc[3], f"{_cr}%", "任务完成率", color="#f59e0b")
+
+    # ── 学校拆分 ──
+    if _rv.get("school_breakdown"):
+        st.subheader("🏫 各学校 预测 vs 实际")
+        _bd_rows = sorted(_rv["school_breakdown"], key=lambda x: -x.get("actual", 0))[:10]
+        _bd_df = pd.DataFrame([{
+            "学校": r["school"], "预测": r["predicted"], "实际": r["actual"],
+            "差值": f"{r['actual'] - r['predicted']:+d}",
+        } for r in _bd_rows])
+        st.dataframe(_bd_df, use_container_width=True, hide_index=True)
+
+    # ── 部门完成度 ──
+    if _rv.get("dept_completion"):
+        st.subheader("✅ 部门执行完成度")
+        _dc_rows = [{
+            "部门": d, "总任务": v["total"], "已完成": v["done"],
+            "完成率": f"{int(v.get('completion_rate', 0)*100)}%",
+        } for d, v in _rv["dept_completion"].items()]
+        st.dataframe(pd.DataFrame(_dc_rows), use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── 复盘文字 ──
+    st.subheader("📝 复盘分析")
+    _col_l, _col_r = st.columns(2)
+    with _col_l:
+        if _rv.get("key_wins"):
+            st.markdown("**🌟 本周亮点**")
+            for _w in _rv["key_wins"]:
+                st.markdown(f"- {_w}")
+        if _rv.get("root_causes"):
+            st.markdown("**🔍 归因分析**")
+            for _c in _rv["root_causes"]:
+                st.markdown(f"- {_c}")
+    with _col_r:
+        if _rv.get("key_misses"):
+            st.markdown("**⚠️ 本周落差**")
+            for _m in _rv["key_misses"]:
+                st.markdown(f"- {_m}")
+        if _rv.get("next_week_focus"):
+            st.markdown("**🎯 下周重点**")
+            for _nf in _rv["next_week_focus"]:
+                st.markdown(f"- {_nf}")
+
+    if _rv.get("review_summary"):
+        st.info(f"**总结：** {_rv['review_summary']}")

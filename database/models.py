@@ -21,6 +21,7 @@ __all__ = [
     "CompanyFact", "BusinessDictionaryTerm",
     "SchoolScore", "SchoolStrategyCard",
     "AgentRun", "AgentFeedback",
+    "OpportunityScore", "LeadScore", "CampaignPrediction", "WeeklyReview",
 ]
 
 
@@ -153,7 +154,7 @@ class Content(Base):
 # ─────────────────────────────────────────
 # 执行任务表（V2 升级版）
 # ─────────────────────────────────────────
-TASK_STATUS = ("todo", "doing", "done", "blocked", "cancelled")
+TASK_STATUS = ("todo", "doing", "done", "delayed", "blocked", "cancelled")
 TASK_TYPES  = ("内容发布", "销售跟进", "产品优化", "后端反馈",
                "风控审核", "管理层决策", "数据复盘", "客户跟进")
 
@@ -172,9 +173,12 @@ class Task(Base):
     related_school      = Column(String(100))
     related_content_id  = Column(Integer, ForeignKey("contents.id"), nullable=True)
     related_campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=True)
+    strategy_id         = Column(Integer, nullable=True)    # 关联 opportunity_scores.id
     expected_output     = Column(Text)
     due_date            = Column(DateTime)
-    status              = Column(String(20), default="todo")
+    status              = Column(String(20), default="todo")  # 见 TASK_STATUS
+    completion_result   = Column(Text)              # 完成时填写：实际产出/结果
+    blockers            = Column(Text)              # blocked/delayed 时填写：阻碍原因
     notes               = Column(Text)
     created_at          = Column(DateTime, default=datetime.utcnow)
     updated_at          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -603,3 +607,104 @@ class AgentFeedback(Base):
     hallucination_flag  = Column(Boolean, default=False)
     feedback_text       = Column(Text)
     created_at          = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# 机会评分汇总表 — 统一存 school/product/lead/campaign 四类评分
+# ─────────────────────────────────────────
+OPPORTUNITY_TYPES = ("school", "product", "lead", "campaign")
+OPPORTUNITY_LEVELS = ("S", "A", "B", "C", "低机会", "Unknown")
+TRAFFIC_LIGHT = ("green", "yellow", "red", "gray")
+
+class OpportunityScore(Base):
+    __tablename__ = "opportunity_scores"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    score_type      = Column(String(20), nullable=False)    # 见 OPPORTUNITY_TYPES
+    entity_name     = Column(String(100), nullable=False)   # 学校名 / 产品名 / lead_id / 活动名
+    entity_id       = Column(String(100))                   # 对应原表 id（可选）
+    score           = Column(Integer, default=0)            # 0-100
+    level           = Column(String(20), default="Unknown") # 见 OPPORTUNITY_LEVELS
+    traffic_light   = Column(String(10), default="gray")    # 见 TRAFFIC_LIGHT
+    score_breakdown = Column(JSON, default=dict)            # {"维度": 分数}
+    score_reason    = Column(JSON, default=list)            # 评分依据列表
+    risk_flags      = Column(JSON, default=list)            # 风险标记
+    recommendation  = Column(Text)                          # 一句话行动建议
+    data_anchored   = Column(Boolean, default=False)        # 是否为历史同期锚定
+    anchor_note     = Column(String(200))                   # 锚定说明
+    scored_at       = Column(DateTime, default=datetime.utcnow)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# 线索机会评分表 — 纯规则，标记高价值待跟进线索
+# ─────────────────────────────────────────
+class LeadScore(Base):
+    __tablename__ = "lead_scores"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    lead_id         = Column(Integer, nullable=False)       # 对应 leads.id
+    customer_name   = Column(String(100))
+    school          = Column(String(100))
+    product_interest= Column(String(100))
+    score           = Column(Integer, default=0)            # 0-100
+    level           = Column(String(20), default="Unknown") # S/A/B/C/低机会
+    score_reason    = Column(JSON, default=list)
+    urgent_flags    = Column(JSON, default=list)            # ["DDL≤7天", "热门学校"]
+    suggested_action= Column(Text)                          # 建议顾问跟进动作
+    scored_at       = Column(DateTime, default=datetime.utcnow)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# 广告预测表 — 每次预测一条，带置信区间，不给单点预测
+# ─────────────────────────────────────────
+PREDICTION_BASIS = ("historical_data", "rule_only", "insufficient_data")
+
+class CampaignPrediction(Base):
+    __tablename__ = "campaign_predictions"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    prediction_week     = Column(String(10), nullable=False)    # "2026-06-09"
+    school              = Column(String(100))
+    product             = Column(String(100))
+    channel             = Column(String(50))                    # 小红书/朋友圈/社群/转介绍
+    hook_theme          = Column(String(200))                   # 推广钩子/主题（Claude生成）
+    predicted_leads_low = Column(Integer, default=0)            # 区间下限
+    predicted_leads_high= Column(Integer, default=0)            # 区间上限
+    confidence          = Column(String(10), default="low")     # high/medium/low
+    confidence_note     = Column(Text)                          # 置信度说明
+    basis               = Column(String(30), default="rule_only")  # 见 PREDICTION_BASIS
+    school_score        = Column(Integer)                       # 引用 school_scores.score
+    product_score       = Column(Integer)                       # 引用 opportunity_scores.score
+    historical_leads    = Column(Integer)                       # 同期历史咨询量
+    rationale           = Column(Text)                          # Claude 撰写的推理
+    created_at          = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# 周复盘表 — 预测 vs 实际对比 + 执行完成度分析
+# ─────────────────────────────────────────
+class WeeklyReview(Base):
+    __tablename__ = "weekly_reviews"
+
+    id                      = Column(Integer, primary_key=True, autoincrement=True)
+    review_week             = Column(String(10), nullable=False)    # "2026-06-09"
+    total_leads_predicted   = Column(Integer, default=0)
+    total_leads_actual      = Column(Integer, default=0)
+    total_orders_predicted  = Column(Integer, default=0)
+    total_orders_actual     = Column(Integer, default=0)
+    school_breakdown        = Column(JSON, default=list)    # [{school, pred, actual, diff}]
+    product_breakdown       = Column(JSON, default=list)
+    tasks_total             = Column(Integer, default=0)
+    tasks_done              = Column(Integer, default=0)
+    tasks_delayed           = Column(Integer, default=0)
+    tasks_blocked           = Column(Integer, default=0)
+    dept_completion         = Column(JSON, default=dict)    # {dept: {total, done, rate}}
+    key_wins                = Column(JSON, default=list)    # 本周亮点
+    key_misses              = Column(JSON, default=list)    # 本周落差
+    root_causes             = Column(JSON, default=list)    # 归因分析
+    next_week_focus         = Column(JSON, default=list)    # 下周重点
+    review_summary          = Column(Text)                  # Claude 生成的复盘叙述
+    generated_by            = Column(String(50), default="WeeklyReviewAgent")
+    created_at              = Column(DateTime, default=datetime.utcnow)

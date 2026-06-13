@@ -50,6 +50,16 @@ agents:
     enabled: true
     status: active
 
+  LeadOpportunityScoringAgent:
+    enabled: true
+    status: active
+  CampaignPredictionAgent:
+    enabled: true
+    status: active
+  WeeklyReviewAgent:
+    enabled: true
+    status: active
+
   # ── 暂时停用 ──
   PosterAgent:
     enabled: false

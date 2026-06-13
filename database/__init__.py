@@ -28,6 +28,12 @@ from .crud import (
     # V8 Agent 管理
     save_agent_run, list_agent_runs, get_agent_last_runs,
     save_agent_feedback, list_agent_feedbacks,
+    # V9 增长管理系统
+    save_opportunity_score, list_opportunity_scores, get_opportunity_score,
+    save_lead_score, list_lead_scores,
+    save_campaign_prediction, list_campaign_predictions,
+    save_weekly_review, list_weekly_reviews, get_weekly_review,
+    update_task_extended, get_task_execution_stats,
 )
 
 __all__ = [
@@ -60,4 +66,10 @@ __all__ = [
     # V8 Agent 管理
     "save_agent_run", "list_agent_runs", "get_agent_last_runs",
     "save_agent_feedback", "list_agent_feedbacks",
+    # V9 增长管理系统
+    "save_opportunity_score", "list_opportunity_scores", "get_opportunity_score",
+    "save_lead_score", "list_lead_scores",
+    "save_campaign_prediction", "list_campaign_predictions",
+    "save_weekly_review", "list_weekly_reviews", "get_weekly_review",
+    "update_task_extended", "get_task_execution_stats",
 ]

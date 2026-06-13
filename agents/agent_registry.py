@@ -57,6 +57,15 @@ AGENT_REGISTRY = {
     "SchoolOpportunityScoringAgent": _a("学校机会评分", "数据层",
         "纯规则计算学校机会分写入 school_scores，不调用LLM不编造。",
         llm=False, db=True, workflows=["weekly_promotion", "update-school-scores"]),
+    "LeadOpportunityScoringAgent": _a("线索机会评分", "数据层",
+        "纯规则计算线索机会分写入 lead_scores，不调用LLM。",
+        llm=False, db=True, workflows=["daily_execution", "update-lead-scores"]),
+    "CampaignPredictionAgent": _a("广告预测", "判断层",
+        "规则计算预测区间，Claude只写钩子/推理，输出写 campaign_predictions。",
+        grounding=False, db=True, workflows=["weekly_growth", "predict-campaigns"]),
+    "WeeklyReviewAgent": _a("周复盘生成", "生成层",
+        "对比预测与实际，分析执行完成度，输出周复盘写入 weekly_reviews。",
+        grounding=False, db=True, workflows=["weekly_review"]),
 
     # ── 判断层 ──
     "PromotionStrategyAgent": _a("月度推广策略", "判断层",

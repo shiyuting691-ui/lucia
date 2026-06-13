@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import text
 from database.db import engine
-from database import list_dictionary_terms, save_school_score
+from database import list_dictionary_terms, save_school_score, save_opportunity_score
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +194,23 @@ class SchoolOpportunityScoringAgent:
             "missing_data": missing,
         }
         save_school_score(data)
+
+        # 同步写入统一 opportunity_scores 表
+        tl = {"S": "green", "A": "green", "B": "yellow",
+              "C": "yellow", "低机会": "red", "Unknown": "gray"}
+        save_opportunity_score({
+            "score_type":    "school",
+            "entity_name":   school,
+            "entity_id":     school,
+            "score":         total,
+            "level":         data["priority_level"],
+            "traffic_light": tl.get(data["priority_level"], "gray"),
+            "score_reason":  score_reason,
+            "risk_flags":    risks,
+            "recommendation": f"主推: {', '.join(hot[:2]) or '待定'}",
+            "data_anchored": bool(hist_note),
+            "anchor_note":   hist_note or "",
+        })
         return data
 
     def _infer_stage(self, c, school, anchor_dt, near_events) -> str:
