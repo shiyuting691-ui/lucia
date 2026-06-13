@@ -34,6 +34,8 @@ from .crud import (
     save_campaign_prediction, list_campaign_predictions,
     save_weekly_review, list_weekly_reviews, get_weekly_review,
     update_task_extended, get_task_execution_stats,
+    # V10 归因分析
+    save_attribution_snapshot, get_latest_attribution, list_attribution_snapshots,
 )
 
 __all__ = [
@@ -72,4 +74,6 @@ __all__ = [
     "save_campaign_prediction", "list_campaign_predictions",
     "save_weekly_review", "list_weekly_reviews", "get_weekly_review",
     "update_task_extended", "get_task_execution_stats",
+    # V10 归因分析
+    "save_attribution_snapshot", "get_latest_attribution", "list_attribution_snapshots",
 ]

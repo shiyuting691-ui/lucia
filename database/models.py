@@ -22,6 +22,7 @@ __all__ = [
     "SchoolScore", "SchoolStrategyCard",
     "AgentRun", "AgentFeedback",
     "OpportunityScore", "LeadScore", "CampaignPrediction", "WeeklyReview",
+    "AttributionSnapshot",
 ]
 
 
@@ -708,3 +709,36 @@ class WeeklyReview(Base):
     review_summary          = Column(Text)                  # Claude 生成的复盘叙述
     generated_by            = Column(String(50), default="WeeklyReviewAgent")
     created_at              = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# 归因快照表 — 渠道/顾问/产品/时效归因分析结果
+# ─────────────────────────────────────────
+class AttributionSnapshot(Base):
+    __tablename__ = "attribution_snapshots"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    snapshot_date    = Column(String(10), nullable=False)   # "2026-06-13"
+    period_start     = Column(String(10))                   # 分析区间起点
+    period_end       = Column(String(10))                   # 分析区间终点
+
+    # 渠道归因 — [{channel, lead_count, order_count, revenue, cvr, avg_days}]
+    channel_data     = Column(JSON, default=list)
+    # 顾问归因 — [{advisor, order_count, gmv, avg_amount, top_product, top_school}]
+    advisor_data     = Column(JSON, default=list)
+    # 产品-学校矩阵 — [{product, school, order_count, revenue, avg_amount}]
+    product_school_data = Column(JSON, default=list)
+    # 时效归因 — [{channel/advisor, avg_days_to_close, median_days}]
+    speed_data       = Column(JSON, default=list)
+
+    # Claude 生成的 3 条关键洞察（注入策略卡）
+    key_insights     = Column(JSON, default=list)
+    # 给下周推广的建议（直接推送企微）
+    action_items     = Column(JSON, default=list)
+
+    order_count      = Column(Integer, default=0)   # 分析区间订单总数
+    lead_count       = Column(Integer, default=0)   # 分析区间线索总数
+    total_revenue    = Column(Float, default=0.0)
+
+    generated_by     = Column(String(50), default="AttributionAnalysisAgent")
+    created_at       = Column(DateTime, default=datetime.utcnow)

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "sqlite-marketing": {
+      "command": "/Users/meilucia/.cache/uv/archive-v0/R2YuUEl4lBF_OvYH6e-FA/bin/python3.11",
+      "args": [
+        "-m",
+        "mcp_server_sqlite",
+        "--db-path",
+        "/Users/meilucia/marketing_automation/marketing.db"
+      ]
+    }
+  }
+}

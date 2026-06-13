@@ -414,12 +414,13 @@ with st.sidebar:
         "💼 顾问作战台",
         "📝 推广素材台",
         "✅ 执行监督台",
+        "📈 归因分析台",
         "📁 数据资料中心",
         "🔁 周复盘台",
         "🛠 Agent管理中心",
     ], label_visibility="collapsed")
     st.divider()
-    st.caption("v9.0 · 增长管理系统")
+    st.caption("v10.0 · 增长管理系统")
 
 
 # ══════════════════════════════════════════════
@@ -3459,3 +3460,182 @@ elif page == "🔁 周复盘台":
 
     if _rv.get("review_summary"):
         st.info(f"**总结：** {_rv['review_summary']}")
+
+
+# ══════════════════════════════════════════════
+# 页面：归因分析台 (V10)
+# ══════════════════════════════════════════════
+elif page == "📈 归因分析台":
+    st.title("📈 归因分析台")
+    st.caption("渠道 / 顾问 / 产品-学校 / 时效 · 基于真实成单数据归因分析")
+
+    from database import get_latest_attribution, list_attribution_snapshots
+
+    # ── 触发分析 ─────────────────────────────────────────────────────
+    col_run, col_period = st.columns([2, 1])
+    with col_run:
+        days_lb = st.selectbox("分析区间（天）", [30, 60, 90, 180], index=2)
+    with col_period:
+        if st.button("🔄 重新分析", use_container_width=True):
+            with st.spinner("归因分析中…"):
+                try:
+                    from agents.attribution_analysis_agent import AttributionAnalysisAgent
+                    _cfg = {}
+                    try:
+                        import yaml
+                        with open("config/agents.yaml") as f:
+                            _cfg = yaml.safe_load(f) or {}
+                    except Exception:
+                        pass
+                    _snap = AttributionAnalysisAgent(_cfg).run(days_lookback=days_lb)
+                    st.success(f"分析完成：{_snap['order_count']}条订单 / {_snap['lead_count']}条线索")
+                    st.rerun()
+                except Exception as _e:
+                    st.error(f"分析失败：{_e}")
+
+    snap = get_latest_attribution()
+
+    if not snap:
+        st.info("暂无归因数据，点击「重新分析」生成。")
+        st.stop()
+
+    st.caption(f"数据区间：{snap['period_start']} → {snap['period_end']}  ·  生成于 {snap['created_at'][:10]}")
+
+    # ── 总览指标 ────────────────────────────────────────────────────
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("分析订单数", snap["order_count"])
+    m2.metric("分析线索数", snap["lead_count"])
+    m3.metric("总营收", f"¥{snap['total_revenue']:,.0f}")
+    ch_data = snap.get("channel_data") or []
+    top_ch = ch_data[0]["channel"] if ch_data else "-"
+    m4.metric("最高营收渠道", top_ch)
+
+    # ── 关键洞察 ────────────────────────────────────────────────────
+    insights = snap.get("key_insights") or []
+    actions  = snap.get("action_items") or []
+    if insights:
+        st.subheader("💡 关键洞察")
+        for _ins in insights:
+            st.success(f"· {_ins}")
+    if actions:
+        st.subheader("🎯 下周行动建议")
+        for _act in actions:
+            st.info(f"→ {_act}")
+
+    st.divider()
+
+    # ── Tab 分四个维度 ───────────────────────────────────────────────
+    tab_ch, tab_adv, tab_ps, tab_speed = st.tabs(
+        ["📡 渠道归因", "👤 顾问归因", "📦 产品×学校", "⏱ 时效归因"]
+    )
+
+    with tab_ch:
+        st.markdown("##### 渠道归因（线索来源 → 成单 → 营收）")
+        ch_data = snap.get("channel_data") or []
+        if ch_data:
+            import pandas as pd
+            df_ch = pd.DataFrame(ch_data)
+            df_ch = df_ch.rename(columns={
+                "channel": "渠道", "lead_count": "线索数",
+                "order_count": "成单数", "revenue": "营收(¥)",
+                "cvr": "转化率(%)", "avg_days_to_close": "平均成交天数"
+            })
+            st.dataframe(df_ch, use_container_width=True, hide_index=True)
+
+            # 营收条形图
+            try:
+                import plotly.express as px
+                fig = px.bar(df_ch, x="渠道", y="营收(¥)", color="转化率(%)",
+                             color_continuous_scale="RdYlGn",
+                             title="各渠道营收 & 转化率")
+                st.plotly_chart(fig, use_container_width=True)
+            except ImportError:
+                pass
+        else:
+            st.info("暂无渠道数据")
+
+    with tab_adv:
+        st.markdown("##### 顾问归因（GMV / 单量 / 客单价）")
+        adv_data = snap.get("advisor_data") or []
+        if adv_data:
+            import pandas as pd
+            df_adv = pd.DataFrame(adv_data)
+            df_adv = df_adv.rename(columns={
+                "advisor": "顾问", "order_count": "成单数",
+                "gmv": "GMV(¥)", "avg_amount": "客单价(¥)",
+                "top_product": "主力产品", "top_school": "主力学校"
+            })
+            st.dataframe(df_adv, use_container_width=True, hide_index=True)
+
+            try:
+                import plotly.express as px
+                fig = px.bar(df_adv, x="顾问", y="GMV(¥)", text="成单数",
+                             title="顾问 GMV 对比")
+                fig.update_traces(textposition="outside")
+                st.plotly_chart(fig, use_container_width=True)
+            except ImportError:
+                pass
+        else:
+            st.info("暂无顾问数据")
+
+    with tab_ps:
+        st.markdown("##### 产品 × 学校成单热力分析（Top 20）")
+        ps_data = snap.get("product_school_data") or []
+        if ps_data:
+            import pandas as pd
+            df_ps = pd.DataFrame(ps_data[:20])
+            df_ps = df_ps.rename(columns={
+                "product": "产品", "school": "学校",
+                "order_count": "成单数", "revenue": "营收(¥)", "avg_amount": "客单价(¥)"
+            })
+            st.dataframe(df_ps, use_container_width=True, hide_index=True)
+
+            try:
+                import plotly.express as px
+                pivot = df_ps.pivot_table(
+                    index="产品", columns="学校", values="成单数", fill_value=0
+                )
+                fig = px.imshow(pivot, color_continuous_scale="Blues",
+                                title="产品 × 学校成单热力图", aspect="auto")
+                st.plotly_chart(fig, use_container_width=True)
+            except ImportError:
+                pass
+        else:
+            st.info("暂无产品-学校数据")
+
+    with tab_speed:
+        st.markdown("##### 时效归因（线索 → 成单平均天数，按顾问）")
+        speed_data = snap.get("speed_data") or []
+        if speed_data:
+            import pandas as pd
+            df_sp = pd.DataFrame(speed_data)
+            df_sp = df_sp.rename(columns={
+                "advisor": "顾问", "sample_count": "样本数",
+                "avg_days": "平均天数", "median_days": "中位数天数",
+                "min_days": "最快(天)", "max_days": "最慢(天)"
+            })
+            st.dataframe(df_sp, use_container_width=True, hide_index=True)
+
+            try:
+                import plotly.express as px
+                fig = px.bar(df_sp, x="顾问", y="平均天数",
+                             error_y=df_sp["最慢(天)"] - df_sp["平均天数"],
+                             title="各顾问平均成交周期（越低越快）",
+                             color="平均天数", color_continuous_scale="RdYlGn_r")
+                st.plotly_chart(fig, use_container_width=True)
+            except ImportError:
+                pass
+        else:
+            st.info("暂无时效数据（需要线索和订单能匹配到同一客户）")
+
+    # ── 历史快照 ────────────────────────────────────────────────────
+    with st.expander("📂 历史归因快照"):
+        history = list_attribution_snapshots(limit=10)
+        for _h in history:
+            st.markdown(
+                f"**{_h['snapshot_date']}** — {_h['period_start']}→{_h['period_end']} "
+                f"| {_h['order_count']}单 ¥{_h['total_revenue']:,.0f}"
+            )
+            for _ins in (_h.get("key_insights") or []):
+                st.caption(f"· {_ins}")
+            st.divider()

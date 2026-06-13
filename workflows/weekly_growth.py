@@ -86,8 +86,20 @@ class WeeklyGrowthWorkflow(BaseWorkflow):
         self._add_step("campaign_prediction", r["status"], records=len(predictions),
                        note=r["error_message"] or f"{len(predictions)} 条预测")
 
-        # 构建 context 注入到后续建议
-        _ctx = self._build_ctx(scores, supply_result)
+        # Step 5b: 归因分析（读最新快照，不强制重新跑）
+        attribution_insights = []
+        try:
+            from database import get_latest_attribution
+            _attr = get_latest_attribution()
+            if _attr:
+                attribution_insights = _attr.get("key_insights") or []
+                self._add_step("attribution_insights", "success",
+                               note=f"读取归因洞察 {len(attribution_insights)} 条")
+        except Exception as _ae:
+            self._add_step("attribution_insights", "skipped", note=str(_ae))
+
+        # 构建 context 注入到后续建议（含归因洞察）
+        _ctx = self._build_ctx(scores, supply_result, attribution_insights)
 
         # Step 6: 周度销售建议
         r = runner.run("WeeklySalesSuggestionAgent",
@@ -107,7 +119,8 @@ class WeeklyGrowthWorkflow(BaseWorkflow):
 
         # Step 8: 企业微信推送
         try:
-            push_text = self._build_wecom_push(scores, ok_cards, supply_result, predictions)
+            push_text = self._build_wecom_push(scores, ok_cards, supply_result, predictions,
+                                               attribution_insights)
             sent = self._send_wecom(push_text)
             self._add_step("wecom_push", "success" if sent else "skipped",
                            note="已推送" if sent else "未配置 WECHAT_WORK_WEBHOOK")
@@ -127,7 +140,7 @@ class WeeklyGrowthWorkflow(BaseWorkflow):
 
     # ── 推广边界摘要 ─────────────────────────────────────────────
     @staticmethod
-    def _build_ctx(scores: list, supply_result: dict) -> str:
+    def _build_ctx(scores: list, supply_result: dict, attribution_insights: list = None) -> str:
         lines = []
         try:
             bd = supply_result.get("promotion_boundary", [])
@@ -143,6 +156,8 @@ class WeeklyGrowthWorkflow(BaseWorkflow):
                 lines.append("重点学校：" + "、".join(s["school_name"] for s in sa[:5]))
         except Exception:
             pass
+        if attribution_insights:
+            lines.append("【归因洞察】" + "；".join(attribution_insights[:2]))
         return "\n".join(lines)
 
     # ── 企业微信推送 ─────────────────────────────────────────────
@@ -156,7 +171,8 @@ class WeeklyGrowthWorkflow(BaseWorkflow):
     def _pname(self, pid: str) -> str:
         return self._PRODUCT_ZH.get(pid, pid)
 
-    def _build_wecom_push(self, scores, cards, supply_result, predictions) -> str:
+    def _build_wecom_push(self, scores, cards, supply_result, predictions,
+                          attribution_insights=None) -> str:
         import os
         from datetime import datetime as _dt, timedelta as _td
         card_map = {c.get("school_name"): c for c in cards if "error" not in c}
@@ -200,6 +216,12 @@ class WeeklyGrowthWorkflow(BaseWorkflow):
             lines.append("⚠️ **风险提醒**")
             for i, r in enumerate(risks[:3], 1):
                 lines.append(f"{i}. {r}")
+            lines.append("")
+
+        if attribution_insights:
+            lines.append("📊 **本期归因洞察**")
+            for _ins in attribution_insights[:2]:
+                lines.append(f"· {_ins}")
             lines.append("")
 
         server = os.environ.get("PUBLIC_URL", "http://121.43.83.158")

@@ -1068,6 +1068,22 @@ def main():
         result = WeeklyGrowthWorkflow(config, week_start=week_start).run()
         print(f"✅ {result.get('summary','完成')}")
 
+    elif cmd == "run-attribution":
+        days_lb = 90
+        for a in args:
+            if a.startswith("--days="):
+                days_lb = int(a[7:])
+            elif a == "--days" and args.index(a) + 1 < len(args):
+                days_lb = int(args[args.index(a) + 1])
+        print(f"\n📊 运行归因分析（最近 {days_lb} 天）...")
+        from agents.attribution_analysis_agent import AttributionAnalysisAgent
+        snap = AttributionAnalysisAgent(config).run(days_lookback=days_lb)
+        print(f"✅ 归因完成：{snap['order_count']} 订单 / {snap['lead_count']} 线索 / ¥{snap['total_revenue']:,.0f}")
+        for ins in snap.get("key_insights") or []:
+            print(f"  💡 {ins}")
+        for act in snap.get("action_items") or []:
+            print(f"  → {act}")
+
     elif cmd == "health-check":
         import sys as _sys
         ok = True

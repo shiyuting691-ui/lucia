@@ -1929,3 +1929,69 @@ def get_task_execution_stats(week_start: str = None) -> dict:
             "completion_rate": round(done / total, 2) if total else 0,
             "by_dept": dept,
         }
+
+
+# ─────────────────────────────────────────
+# V10 归因快照 CRUD
+# ─────────────────────────────────────────
+def save_attribution_snapshot(data: dict):
+    """upsert by snapshot_date"""
+    from database.models import AttributionSnapshot
+    with get_session() as session:
+        obj = session.query(AttributionSnapshot).filter_by(
+            snapshot_date=data["snapshot_date"]
+        ).first()
+        if obj:
+            for k, v in data.items():
+                if hasattr(obj, k):
+                    setattr(obj, k, v)
+        else:
+            obj = AttributionSnapshot(**{k: v for k, v in data.items()
+                                         if hasattr(AttributionSnapshot, k)})
+            session.add(obj)
+        session.commit()
+        return obj.id if obj.id else None
+
+
+def get_latest_attribution() -> dict | None:
+    """最新一次归因快照"""
+    from database.models import AttributionSnapshot
+    with get_session() as session:
+        obj = session.query(AttributionSnapshot).order_by(
+            AttributionSnapshot.created_at.desc()
+        ).first()
+        if not obj:
+            return None
+        return {
+            "snapshot_date":      obj.snapshot_date,
+            "period_start":       obj.period_start,
+            "period_end":         obj.period_end,
+            "channel_data":       obj.channel_data or [],
+            "advisor_data":       obj.advisor_data or [],
+            "product_school_data": obj.product_school_data or [],
+            "speed_data":         obj.speed_data or [],
+            "key_insights":       obj.key_insights or [],
+            "action_items":       obj.action_items or [],
+            "order_count":        obj.order_count,
+            "lead_count":         obj.lead_count,
+            "total_revenue":      obj.total_revenue,
+            "created_at":         str(obj.created_at),
+        }
+
+
+def list_attribution_snapshots(limit: int = 10) -> list:
+    from database.models import AttributionSnapshot
+    with get_session() as session:
+        objs = session.query(AttributionSnapshot).order_by(
+            AttributionSnapshot.created_at.desc()
+        ).limit(limit).all()
+        return [{
+            "snapshot_date": o.snapshot_date,
+            "period_start":  o.period_start,
+            "period_end":    o.period_end,
+            "order_count":   o.order_count,
+            "lead_count":    o.lead_count,
+            "total_revenue": o.total_revenue,
+            "key_insights":  o.key_insights or [],
+            "created_at":    str(o.created_at),
+        } for o in objs]
