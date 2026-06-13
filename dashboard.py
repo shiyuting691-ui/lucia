@@ -407,7 +407,7 @@ with st.sidebar:
     st.caption(f"📅 {datetime.now().strftime('%Y-%m-%d')}")
     st.divider()
     st.markdown('<div style="font-size:11px;color:#475569;font-weight:600;letter-spacing:1px;padding:4px 0 6px 2px">增长管理</div>', unsafe_allow_html=True)
-    page = st.radio("", [
+    page = st.radio("导航页面", [
         "📊 老板驾驶舱",
         "🏫 学校增长情报台",
         "🎯 广告预测台",
