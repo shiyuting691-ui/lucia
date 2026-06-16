@@ -1,0 +1,28 @@
+{
+  "brandOrAccount": "示例IP号",
+  "accountRole": "ip",
+  "searchFunnel": "midstream",
+  "goal": "通过一篇过程分享内容提升收藏和真实评论",
+  "topic": "KCL AI率78%改了一整天还是高",
+  "targetAudience": "正在处理essay AI率风险的英国留学生",
+  "longTailKeyword": "KCL AI率78%改了一整天还是高怎么办",
+  "coreViewpoint": "AI率高不一定只靠改词解决，先判断是表达重复、结构模板化，还是引用和paraphrase方式出了问题。",
+  "evidence": [
+    "很多同学第一反应是替换同义词，但报告仍然可能提示整体表达像机器生成",
+    "AI率问题常常和句式重复、段落推进方式、引用解释过浅同时出现",
+    "真正有效的处理顺序通常是先看风险来源，再决定是否重写结构或补分析"
+  ],
+  "tone": [
+    "具体",
+    "有温度",
+    "像学姐分享过程"
+  ],
+  "mustInclude": [
+    "先看AI报告标红位置",
+    "不要只做同义词替换",
+    "区分句子问题和结构问题"
+  ],
+  "commentQuestion": "你现在是报告解释看不懂，还是改完之后分数还是不降？",
+  "cta": "可以把你卡住的那一步说一下，我按情况给你拆。",
+  "templateName": "IP号过程分享型"
+}

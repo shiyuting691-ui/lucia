@@ -1,0 +1,25 @@
+{
+  "platform": "xiaohongshu",
+  "mode": "chrome_assisted",
+  "dailyLimitPerKeyword": 5,
+  "keywords": [
+    {
+      "keyword": "KCL AI率 essay",
+      "accountRoleHint": "ip",
+      "searchFunnelHint": "midstream",
+      "notes": "关注AI率、改写、turnitin、essay风险相关内容。"
+    },
+    {
+      "keyword": "墨大 GEOG10001 assignment",
+      "accountRoleHint": "student",
+      "searchFunnelHint": "upstream",
+      "notes": "关注课程代码、作业求助、看不懂rubric。"
+    },
+    {
+      "keyword": "英国 dissertation 还有两周",
+      "accountRoleHint": "business",
+      "searchFunnelHint": "downstream",
+      "notes": "关注DDL、dissertation进度、案例和可信度。"
+    }
+  ]
+}

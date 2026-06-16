@@ -1,0 +1,40 @@
+{
+  "name": "完整小红书内容生产流程",
+  "description": "包含当前 controller 的完整流程，适合排查采集、生产和交付链路",
+  "steps": [
+    "config:check",
+    "collect",
+    "collect:source",
+    "collect:lark",
+    "collect:social",
+    "collect:inbox",
+    "collect:import",
+    "collect:api",
+    "collect:apify",
+    "analyze",
+    "draft",
+    "draft:roles",
+    "draft:courses",
+    "visual:render",
+    "ops",
+    "publish:roles",
+    "publish",
+    "wechat",
+    "push:wechat",
+    "push:wxpusher",
+    "push:lark"
+  ],
+  "expectedOutputs": [
+    "outputs/collection-plan.md",
+    "outputs/hotpost-analysis.md",
+    "outputs/post-draft.md",
+    "outputs/role-based-post-drafts.md",
+    "outputs/course-precision-post-drafts.md",
+    "outputs/visual-package.md",
+    "outputs/visual-images/manifest.json",
+    "outputs/role-publish-ready.md",
+    "outputs/account-ops-checklist.md",
+    "outputs/publish-ready.md",
+    "outputs/wechat-daily-digest.txt"
+  ]
+}

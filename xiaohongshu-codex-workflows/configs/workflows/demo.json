@@ -1,0 +1,21 @@
+{
+  "name": "Demo 测试流程",
+  "description": "用于团队试跑，不依赖外部 API 和推送服务",
+  "steps": [
+    "config:check",
+    "collect:import",
+    "analyze",
+    "draft:roles",
+    "visual:render",
+    "publish:roles",
+    "wechat"
+  ],
+  "expectedOutputs": [
+    "outputs/hotpost-analysis.md",
+    "outputs/role-based-post-drafts.md",
+    "outputs/visual-package.md",
+    "outputs/visual-images/manifest.json",
+    "outputs/role-publish-ready.md",
+    "outputs/wechat-daily-digest.txt"
+  ]
+}

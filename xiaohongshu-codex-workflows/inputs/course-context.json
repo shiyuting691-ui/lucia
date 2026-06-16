@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "university": "",
+  "courseCode": "",
+  "courseTitle": "",
+  "academicYear": "",
+  "studentStage": "",
+  "assessment": {
+    "type": "",
+    "weight": "",
+    "deliverable": "",
+    "deadline": "",
+    "rubricFocus": []
+  },
+  "studentNeed": "",
+  "officialSources": []
+}

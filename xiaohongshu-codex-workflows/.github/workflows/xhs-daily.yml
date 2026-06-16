@@ -1,0 +1,64 @@
+name: XHS Daily Workflow
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  xhs-daily:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: production
+      XHS_AUTO_PUSH_WXPUSHER: ${{ secrets.XHS_AUTO_PUSH_WXPUSHER }}
+      XHS_AUTO_PUSH_LARK: ${{ secrets.XHS_AUTO_PUSH_LARK }}
+      WECHAT_PUSH_ENABLED: ${{ secrets.WECHAT_PUSH_ENABLED }}
+      WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+      WXPUSHER_TOKEN: ${{ secrets.WXPUSHER_TOKEN }}
+      WXPUSHER_UID: ${{ secrets.WXPUSHER_UID }}
+      LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+      LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+      LARK_RECEIVE_ID_TYPE: ${{ secrets.LARK_RECEIVE_ID_TYPE }}
+      LARK_RECEIVE_ID: ${{ secrets.LARK_RECEIVE_ID }}
+      LARK_SHEET_URLS: ${{ secrets.LARK_SHEET_URLS }}
+      LARK_FILE_SOURCES_JSON: ${{ secrets.LARK_FILE_SOURCES_JSON }}
+      LARK_SHEET_RANGE: ${{ secrets.LARK_SHEET_RANGE }}
+      XHS_APIFY_ENABLED: ${{ secrets.XHS_APIFY_ENABLED }}
+      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      APIFY_XHS_ACTOR_ID: ${{ secrets.APIFY_XHS_ACTOR_ID }}
+      XHS_COOKIE: ${{ secrets.XHS_COOKIE }}
+      APIFY_XHS_COOKIE: ${{ secrets.APIFY_XHS_COOKIE }}
+      XHS_SOURCE_URL: ${{ secrets.XHS_SOURCE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cloud environment check
+        run: npm run cloud:check
+
+      - name: Run daily workflow
+        run: npm run daily
+
+      - name: Upload outputs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xhs-outputs-${{ github.run_id }}
+          path: |
+            outputs/latest
+            outputs/runs
+            outputs/controller-status.md
+            outputs/controller-status.json
+            outputs/cloud-check-status.md
+            outputs/cloud-check-status.json
+          if-no-files-found: warn

@@ -1,0 +1,22 @@
+{
+  "name": "日常小红书内容生产",
+  "description": "适合运营每天使用，只跑核心内容生产链路",
+  "steps": [
+    "config:check",
+    "collect:import",
+    "collect:social",
+    "analyze",
+    "draft:roles",
+    "visual:render",
+    "publish:roles",
+    "wechat"
+  ],
+  "expectedOutputs": [
+    "outputs/hotpost-analysis.md",
+    "outputs/role-based-post-drafts.md",
+    "outputs/visual-package.md",
+    "outputs/visual-images/manifest.json",
+    "outputs/role-publish-ready.md",
+    "outputs/wechat-daily-digest.txt"
+  ]
+}

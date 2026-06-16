@@ -1,0 +1,29 @@
+[
+  {
+    "id": "2026-05-15-ip-ai-rate-kcl",
+    "status": "pending_approval",
+    "accountRole": "ip",
+    "accountName": "示例IP号",
+    "searchFunnel": "midstream",
+    "scheduledAt": "2026-05-16 19:30",
+    "title": "KCL AI率78%改了一整天还是高，先别只改词",
+    "bodySource": "outputs/post-draft.md",
+    "coverIdea": "备忘录大字图：KCL AI率78% 改了一整天还是高",
+    "imageAssets": [],
+    "hashtags": [
+      "英国留学",
+      "KCL",
+      "essay",
+      "AI率",
+      "留学生作业"
+    ],
+    "prePublishChecks": [
+      "正文不写硬引流",
+      "不承诺结果",
+      "补充真实细节或案例边界",
+      "图片脱敏",
+      "确认账号角色和语气匹配"
+    ],
+    "notes": "自动生成发布包后，需要人工确认并执行最终发布。"
+  }
+]

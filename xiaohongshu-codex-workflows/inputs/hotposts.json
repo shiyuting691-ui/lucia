@@ -1,0 +1,838 @@
+[
+  {
+    "title": "墨大GEOG10001 assignment2真的无从下手",
+    "url": "",
+    "accountRole": "student",
+    "searchFunnel": "upstream",
+    "authorType": "学生号",
+    "likes": 12000,
+    "comments": 860,
+    "favorites": 5400,
+    "topic": "课程作业求助",
+    "audience": "英澳留学生",
+    "longTailKeyword": "墨大GEOG10001 assignment2无从下手怎么办",
+    "hook": "具体课程代码 + 作业节点 + 崩溃情绪",
+    "structure": [
+      "直接进入具体课程场景",
+      "描述看不懂要求的卡点",
+      "说自己已经尝试过但没解决",
+      "结尾开放式求助"
+    ],
+    "tone": [
+      "真实",
+      "焦虑",
+      "学生视角"
+    ],
+    "commentTrigger": "有没有同课同学知道怎么拆题",
+    "cta": "求助评论",
+    "notes": "课程代码非常具体，能命中搜索；正文不应出现服务信息。"
+  },
+  {
+    "title": "KCL AI率78%改了一整天还是高",
+    "url": "",
+    "accountRole": "ip",
+    "searchFunnel": "midstream",
+    "authorType": "IP号",
+    "likes": 8600,
+    "comments": 420,
+    "favorites": 3900,
+    "topic": "AI率风险处理",
+    "audience": "英国留学生",
+    "longTailKeyword": "KCL AI率78%改了一整天还是高怎么办",
+    "hook": "学校 + AI率数字 + 已经努力但没解决",
+    "structure": [
+      "开头复述真实困境",
+      "解释为什么只改词不够",
+      "拆风险判断顺序",
+      "结尾开放式提问"
+    ],
+    "tone": [
+      "实用",
+      "有温度",
+      "过程分享"
+    ],
+    "commentTrigger": "你是卡在报告解释还是原文结构",
+    "cta": "评论区说具体卡点",
+    "notes": "适合IP号，不要写成硬广，也不要承诺一定降下来。"
+  },
+  {
+    "title": "考场越漂亮 考试越难🤪",
+    "url": "https://www.xiaohongshu.com/explore/69f52bc8000000001f001b7f?xsec_token=ABJ6zwMcQqbDhe0gtxJI4q_SyjQA7cFinFIzmhHWr_A7g=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "滋滋幽幽",
+    "likes": 8021,
+    "comments": 641,
+    "favorites": 775,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "考场越漂亮 考试越难🤪",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：12511.5；总互动：11142；分享：1705；笔记ID：69f52bc8000000001f001b7f"
+  },
+  {
+    "title": "那参考文献从哪来？那不成自己背吗？？？？",
+    "url": "https://www.xiaohongshu.com/explore/6a058c8f00000000060378cb?xsec_token=ABgRLhXW8u5gV9Mj3bim5aoec6yjopVJF9MCMCJmA7C1I=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "碎嘴豆粒瓜",
+    "likes": 7345,
+    "comments": 417,
+    "favorites": 614,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "那参考文献从哪来？那不成自己背吗？？？？",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：10754.8；总互动：9755；分享：1379；笔记ID：6a058c8f00000000060378cb"
+  },
+  {
+    "title": "LSE你荒谬至极",
+    "url": "https://www.xiaohongshu.com/explore/6967dd23000000000a029582?xsec_token=ABLWeoDlUbz44z5ghdUUiEL09T5889G3k9s89d8lFkQh4=&xsec_source=pc_search",
+    "accountRole": "business",
+    "searchFunnel": "downstream",
+    "authorType": "Sandi Lwin",
+    "likes": 3463,
+    "comments": 510,
+    "favorites": 378,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "LSE你荒谬至极",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：7703.2；总互动：6562；分享：2211；笔记ID：6967dd23000000000a029582"
+  },
+  {
+    "title": "我把自己KCL的毕业证 撕了",
+    "url": "https://www.xiaohongshu.com/explore/69cfbac1000000001d01e3b8?xsec_token=ABC41gyenTtaLNB755cbess7MqWqrw4SPhUOvXvgngsgQ=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "李易达",
+    "likes": 1713,
+    "comments": 769,
+    "favorites": 343,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "我把自己KCL的毕业证 撕了",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：5605.1；总互动：4358；分享：1533；笔记ID：69cfbac1000000001d01e3b8"
+  },
+  {
+    "title": "🇬🇧UCL留子只学一晚考88分的秘诀&方法",
+    "url": "https://www.xiaohongshu.com/explore/6829e6ae00000000120035e5?xsec_token=ABiPHBNzvJqLMG6YWgub_eF7nzgP1GBat_su8OwT7TTvA=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "虫虫ovo",
+    "likes": 1360,
+    "comments": 26,
+    "favorites": 1238,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧UCL留子只学一晚考88分的秘诀&方法",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：3453.8；总互动：2778；分享：154；笔记ID：6829e6ae00000000120035e5"
+  },
+  {
+    "title": "还要做做题和模拟卷这样，真的可以吗？我真的重度拖延，每个学期都这样考试前几天狂学",
+    "url": "https://www.xiaohongshu.com/explore/6938e511000000001e00220e?xsec_token=ABkzZMng3SS9ljLCwZ8zfGzEtAOzd8JilDAvsWIi6hmv8=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "momo",
+    "likes": 1139,
+    "comments": 585,
+    "favorites": 247,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "还要做做题和模拟卷这样，真的可以吗？我真的重度拖延，每个学期都这样考试前几天狂学",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：2896.7；总互动：2152；分享：181；笔记ID：6938e511000000001e00220e"
+  },
+  {
+    "title": "听我的学妹说今年少了很多人，学生有些也公寓也降价了#硕士[话题]# #硕士留学[",
+    "url": "https://www.xiaohongshu.com/explore/6986c67e000000002800ad51?xsec_token=AB2g_BpT5Sum0sQYGChF9xybJYOiI51fE9DqOGF0Tc8FA=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "upstream",
+    "authorType": "Jill",
+    "likes": 876,
+    "comments": 413,
+    "favorites": 407,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "听我的学妹说今年少了很多人，学生有些也公寓也降价了#硕士[话题]# #硕士留学[",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：2611.3；总互动：1945；分享：249；笔记ID：6986c67e000000002800ad51"
+  },
+  {
+    "title": "🇬🇧上cam官网了☺️",
+    "url": "https://www.xiaohongshu.com/explore/6904ecab000000000700cfd0?xsec_token=ABtyFxFsdm3MYWCCYzEXEaxAsF0efIgdy9gGTgMVdolhE=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "upstream",
+    "authorType": "小蛇",
+    "likes": 1400,
+    "comments": 254,
+    "favorites": 129,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧上cam官网了☺️",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：2251.5；总互动：1908；分享：125；笔记ID：6904ecab000000000700cfd0"
+  },
+  {
+    "title": "太卷了",
+    "url": "https://www.xiaohongshu.com/explore/69e0b220000000001a033bbf?xsec_token=ABCQW7dyzom6dAOtGVF6dQOcfPlzGDo9sUz8T14AmilKU=&xsec_source=pc_search",
+    "accountRole": "ip",
+    "searchFunnel": "midstream",
+    "authorType": "不对",
+    "likes": 979,
+    "comments": 250,
+    "favorites": 233,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "太卷了",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：2172.9；总互动：1749；分享：287；笔记ID：69e0b220000000001a033bbf"
+  },
+  {
+    "title": "谢谢你夸我聪明又难看",
+    "url": "https://www.xiaohongshu.com/explore/69c0f9cd000000002301536f?xsec_token=AB8ImNSrVUuhGRwm5M5jYnl7S9FfO7fT8IEuOx_jRoSpM=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "upstream",
+    "authorType": "Hugo学长",
+    "likes": 639,
+    "comments": 251,
+    "favorites": 93,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "谢谢你夸我聪明又难看",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：2121.7；总互动：1684；分享：701；笔记ID：69c0f9cd000000002301536f"
+  },
+  {
+    "title": "在🇬🇧邮局被陌生人骂哭 我发誓没有下次",
+    "url": "https://www.xiaohongshu.com/explore/69247d47000000001e0214fb?xsec_token=ABWAiBb1K3-j-FUxY6iDv-BHFQte7pI7vZEHqxGzR91A4=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "midstream",
+    "authorType": "特te",
+    "likes": 1031,
+    "comments": 209,
+    "favorites": 366,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "在🇬🇧邮局被陌生人骂哭 我发誓没有下次",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：2067.6；总互动：1664；分享：58；笔记ID：69247d47000000001e0214fb"
+  },
+  {
+    "title": "🇬🇧 Cambridge｜Final 😵‍💫😵‍💫😵‍💫",
+    "url": "https://www.xiaohongshu.com/explore/696fd08d000000000b011526?xsec_token=ABGPTMt7CqRtr9T6EN_7-TYNlWE23HP4hyfar3-2BvLKE=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "Chris zzz",
+    "likes": 1537,
+    "comments": 7,
+    "favorites": 160,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧 Cambridge｜Final 😵‍💫😵‍💫😵‍💫",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：1804.2；总互动：1715；分享：11；笔记ID：696fd08d000000000b011526"
+  },
+  {
+    "title": "每次到放假，大家都各做各的，不再交流。以至于写assessment的时候，大家也",
+    "url": "https://www.xiaohongshu.com/explore/69e00ab1000000001d018968?xsec_token=ABCQW7dyzom6dAOtGVF6dQOctHjwARCRVyC4Uxn6G9UEg=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "upstream",
+    "authorType": "樱花树下3570",
+    "likes": 707,
+    "comments": 188,
+    "favorites": 295,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "每次到放假，大家都各做各的，不再交流。以至于写assessment的时候，大家也",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：1562.7；总互动：1221；分享：31；笔记ID：69e00ab1000000001d018968"
+  },
+  {
+    "title": "🇬🇧急求final创造奇迹邪修",
+    "url": "https://www.xiaohongshu.com/explore/6958ee1f000000001e0178c2?xsec_token=ABEFsTg_9wTS65rnYSRBKgyldb6z4n2VgOhoYM364g_Hw=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "momo",
+    "likes": 585,
+    "comments": 90,
+    "favorites": 364,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧急求final创造奇迹邪修",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：1391.4；总互动：1106；分享：67；笔记ID：6958ee1f000000001e0178c2"
+  },
+  {
+    "title": "一想到assessment基本全是essay就心累",
+    "url": "https://www.xiaohongshu.com/explore/69440e18000000000d036abf?xsec_token=ABYkzzYTw5tYlZCUNzIMDqSfDpSIeRT48o6DurM5SGm4I=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "Mirror's Third Act",
+    "likes": 468,
+    "comments": 227,
+    "favorites": 152,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "一想到assessment基本全是essay就心累",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：1249.6；总互动：930；分享：83；笔记ID：69440e18000000000d036abf"
+  },
+  {
+    "title": "🇬🇧 如何偷最大的懒拿到不错的成绩（2）",
+    "url": "https://www.xiaohongshu.com/explore/698a6a7b000000001a023e10?xsec_token=AB7A1gzNvL1AjmyHb56bwwNVGIoplrOnfAMQemA0Lp8fs=&xsec_source=pc_search",
+    "accountRole": "business",
+    "searchFunnel": "downstream",
+    "authorType": "薯条",
+    "likes": 430,
+    "comments": 2,
+    "favorites": 377,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧 如何偷最大的懒拿到不错的成绩（2）",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：1058.3；总互动：858；分享：49；笔记ID：698a6a7b000000001a023e10"
+  },
+  {
+    "title": "🇬🇧什么样子的dissertation容易挂？",
+    "url": "https://www.xiaohongshu.com/explore/688232780000000011000c01?xsec_token=ABAa9iIKVuHp7_ldaFxiFHgWkB8tZpv8SQ5eRFEoDHunw=&xsec_source=pc_search",
+    "accountRole": "business",
+    "searchFunnel": "downstream",
+    "authorType": "英伦考试菌",
+    "likes": 464,
+    "comments": 1,
+    "favorites": 358,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧什么样子的dissertation容易挂？",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：1030.6；总互动：846；分享：23；笔记ID：688232780000000011000c01"
+  },
+  {
+    "title": "杜伦大学 争议帖底部已被国人攻占",
+    "url": "https://www.xiaohongshu.com/explore/6a09f3b20000000013020400?xsec_token=ABfSOahdxz4ieWnpFHXiCDkyaeI06C75jjKCIE3BVu6w4=&xsec_source=pc_search",
+    "accountRole": "ip",
+    "searchFunnel": "upstream",
+    "authorType": "晚夜天晴🐽",
+    "likes": 614,
+    "comments": 81,
+    "favorites": 37,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "杜伦大学 争议帖底部已被国人攻占",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：961.1；总互动：840；分享：108；笔记ID：6a09f3b20000000013020400"
+  },
+  {
+    "title": "英国恶心的考试机制，先放假后考试",
+    "url": "https://www.xiaohongshu.com/explore/694be724000000001e02a3bc?xsec_token=ABw1letXIAtdmo6xjeBBtpe9JK1B5efoNjZ53Q9oSgVL8=&xsec_source=pc_search",
+    "accountRole": "business",
+    "searchFunnel": "downstream",
+    "authorType": "鹤川一",
+    "likes": 574,
+    "comments": 80,
+    "favorites": 48,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "英国恶心的考试机制，先放假后考试",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：897.2；总互动：778；分享：76；笔记ID：694be724000000001e02a3bc"
+  },
+  {
+    "title": "🇬🇧英区留子出成绩",
+    "url": "https://www.xiaohongshu.com/explore/65d4f72e000000000102abeb?xsec_token=ABq-4xRVqQWJfPAd5n4A824Re7zYqKvHEbfvQpbeF4ips=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "midstream",
+    "authorType": "Piglet",
+    "likes": 474,
+    "comments": 178,
+    "favorites": 27,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧英区留子出成绩",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：878.9；总互动：686；分享：7；笔记ID：65d4f72e000000000102abeb"
+  },
+  {
+    "title": "英区第一个0作业出现了",
+    "url": "https://www.xiaohongshu.com/explore/69d10ca10000000023014d34?xsec_token=AB1cQA1D-huqvwNXyQ0vHnupz6-L0UZPMsdur6cROE4jw=&xsec_source=pc_search",
+    "accountRole": "business",
+    "searchFunnel": "downstream",
+    "authorType": "海面堡堡",
+    "likes": 296,
+    "comments": 169,
+    "favorites": 57,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "英区第一个0作业出现了",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：809.5；总互动：597；分享：75；笔记ID：69d10ca10000000023014d34"
+  },
+  {
+    "title": "UCL Final我真的是不会放过你的",
+    "url": "https://www.xiaohongshu.com/explore/69dda02a000000002102d5ee?xsec_token=ABpY0SkgbPeJ_NT6s9qHNaopnPlUII7qfaxVp2o7MZoUM=&xsec_source=pc_search",
+    "accountRole": "business",
+    "searchFunnel": "downstream",
+    "authorType": "Willll_",
+    "likes": 408,
+    "comments": 72,
+    "favorites": 59,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "UCL Final我真的是不会放过你的",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：756.9；总互动：636；分享：97；笔记ID：69dda02a000000002102d5ee"
+  },
+  {
+    "title": "final怎么办",
+    "url": "https://www.xiaohongshu.com/explore/69fe29900000000035024124?xsec_token=ABt_fSo5vaahayouhv5Fv1pKoJViUJklTEMiYCuH6vOR8=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "momo",
+    "likes": 295,
+    "comments": 122,
+    "favorites": 89,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "final怎么办",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：728.9；总互动：553；分享：47；笔记ID：69fe29900000000035024124"
+  },
+  {
+    "title": "🇬🇧数学系一年一度大炼狱开战了",
+    "url": "https://www.xiaohongshu.com/explore/69fd1f2800000000380347ea?xsec_token=ABbOKOvMtUp0TM6-i9nxcF0seZdPyOvPpeytUPdkjhcJ8=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "niniyoooni",
+    "likes": 404,
+    "comments": 66,
+    "favorites": 53,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧数学系一年一度大炼狱开战了",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：665.9；总互动：565；分享：42；笔记ID：69fd1f2800000000380347ea"
+  },
+  {
+    "title": "所以你们都用几天复习final..",
+    "url": "https://www.xiaohongshu.com/explore/69e7e8e20000000021004f20?xsec_token=ABGcxoUFA0uvpd-Nd8R5VY5lr2LvmtohHyLtvd0vhREC8=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "Micky Zhu✨",
+    "likes": 470,
+    "comments": 48,
+    "favorites": 33,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "所以你们都用几天复习final..",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：631.1；总互动：564；分享：13；笔记ID：69e7e8e20000000021004f20"
+  },
+  {
+    "title": "🇬🇧应该是有史以来最高分了",
+    "url": "https://www.xiaohongshu.com/explore/69fce954000000003802137f?xsec_token=AByssAlv3Ehqo5jWxbj79X5SuJ6GvCw_if9iYBPyXPrZU=&xsec_source=pc_search",
+    "accountRole": "ip",
+    "searchFunnel": "upstream",
+    "authorType": "Mono",
+    "likes": 357,
+    "comments": 113,
+    "favorites": 17,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧应该是有史以来最高分了",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：627.7；总互动：503；分享：16；笔记ID：69fce954000000003802137f"
+  },
+  {
+    "title": "四个小时只能学一个lecture （已考完✨",
+    "url": "https://www.xiaohongshu.com/explore/680bf15f000000001c011253?xsec_token=ABSQR4Ehy2OiFILpTCMFZrv10G4zQyU9amgdx4UMoky9c=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "daoooo123",
+    "likes": 362,
+    "comments": 67,
+    "favorites": 59,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "四个小时只能学一个lecture （已考完✨",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：606.1；总互动：506；分享：18；笔记ID：680bf15f000000001c011253"
+  },
+  {
+    "title": "🇬🇧大后天final已经在算最少考几分了",
+    "url": "https://www.xiaohongshu.com/explore/6654f9800000000005004779?xsec_token=ABUoGaAlDW2j1Za8cPfdBOyUaP7dlofzY_su1JNil02p8=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "InkSwinger",
+    "likes": 278,
+    "comments": 110,
+    "favorites": 22,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧大后天final已经在算最少考几分了",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：601.8；总互动：469；分享：59；笔记ID：6654f9800000000005004779"
+  },
+  {
+    "title": "🇬🇧final复习到崩溃求助",
+    "url": "https://www.xiaohongshu.com/explore/69d044e5000000001d01f79b?xsec_token=ABz_YlFaXrmyk0kTRQl7Z0DsDTm6ARm4hj9rAayI09Xo8=&xsec_source=pc_search",
+    "accountRole": "business",
+    "searchFunnel": "downstream",
+    "authorType": "momo",
+    "likes": 238,
+    "comments": 128,
+    "favorites": 54,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "🇬🇧final复习到崩溃求助",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：594.2；总互动：436；分享：16；笔记ID：69d044e5000000001d01f79b"
+  },
+  {
+    "title": "econ final",
+    "url": "https://www.xiaohongshu.com/explore/681d315f000000002002ada1?xsec_token=ABVFqDGwBWVS9Ebe7G4XUI8_PyyuNXh2J5o6XyDiQ1gYg=&xsec_source=pc_search",
+    "accountRole": "student",
+    "searchFunnel": "downstream",
+    "authorType": "奶酪huhu",
+    "likes": 505,
+    "comments": 11,
+    "favorites": 26,
+    "topic": "英国fianl",
+    "audience": "目标小红书搜索用户",
+    "longTailKeyword": "英国fianl",
+    "hook": "econ final",
+    "structure": [
+      "标题先给具体痛点",
+      "正文补充真实场景",
+      "结尾开放评论问题"
+    ],
+    "tone": [
+      "真实",
+      "搜索友好"
+    ],
+    "commentTrigger": "你现在卡在哪一步",
+    "cta": "评论区说具体情况",
+    "notes": "来源：社媒助手表格 小红书/【社媒助手】关键词「英国fianl」的笔记搜索结果-20260521-2118.xlsx；关键词：英国fianl；热度分：569.6；总互动：545；分享：3；笔记ID：681d315f000000002002ada1"
+  }
+]
