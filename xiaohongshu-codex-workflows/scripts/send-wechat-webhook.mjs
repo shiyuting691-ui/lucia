@@ -66,13 +66,19 @@ const response = await fetch(webhookUrl, {
 });
 
 const body = await response.text();
+let parsedBody = body;
+try {
+  parsedBody = JSON.parse(body);
+} catch {
+  // Keep raw response text if the webhook returns non-JSON content.
+}
 
-if (!response.ok) {
+if (!response.ok || parsedBody?.errcode) {
   writeStatus({
     ok: false,
     skipped: false,
     status: response.status,
-    response: body
+    response: parsedBody
   });
   throw new Error(`微信推送失败：HTTP ${response.status} ${body}`);
 }
@@ -81,7 +87,7 @@ writeStatus({
   ok: true,
   skipped: false,
   status: response.status,
-  response: body
+  response: parsedBody
 });
 
 console.log("微信自动推送已完成。");
