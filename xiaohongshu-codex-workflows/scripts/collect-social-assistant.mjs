@@ -8,9 +8,9 @@ const root = path.resolve(process.cwd());
 loadEnvFile(root);
 
 const defaultPython = "/Users/meilucia/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
-const defaultSourceDir = "/Users/meilucia/Downloads/社媒助手";
+const projectSourceDir = path.join(root, "inputs", "social-assistant");
+const localSourceDir = "/Users/meilucia/Downloads/社媒助手";
 
-const sourceDir = process.env.SOCIAL_ASSISTANT_DIR || defaultSourceDir;
 const pythonBin = process.env.XHS_PYTHON_BIN || (fs.existsSync(defaultPython) ? defaultPython : "python3");
 const maxPerFile = toNumber(process.env.SOCIAL_ASSISTANT_MAX_PER_FILE || 30);
 const maxPerRole = toNumber(process.env.SOCIAL_ASSISTANT_MAX_PER_ROLE || 10);
@@ -33,6 +33,9 @@ const walk = (dir) => {
     return supported.has(path.extname(entry.name).toLowerCase()) ? [fullPath] : [];
   });
 };
+
+const defaultSourceDir = walk(projectSourceDir).length ? projectSourceDir : localSourceDir;
+const sourceDir = process.env.SOCIAL_ASSISTANT_DIR || defaultSourceDir;
 
 const extractKeyword = (filePath) => {
   const base = path.basename(filePath, path.extname(filePath));
