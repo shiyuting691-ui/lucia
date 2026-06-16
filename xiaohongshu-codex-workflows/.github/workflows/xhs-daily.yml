@@ -43,6 +43,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Python dependencies
+        run: python3 -m pip install --upgrade pip pillow openpyxl
+
       - name: Cloud environment check
         run: npm run cloud:check
 
