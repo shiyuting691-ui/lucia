@@ -41,7 +41,7 @@ const stepDefinitions = {
   "publish:roles": { group: "production", label: "三账号发布包", required: true },
   publish: { group: "production", label: "待发布包", required: true },
   wechat: { group: "delivery", label: "微信日报", required: true },
-  "push:wechat": { group: "delivery", label: "企业微信推送", required: false },
+  "push:wechat": { group: "delivery", label: "企业微信推送", required: true },
   "push:wxpusher": {
     group: "delivery",
     label: "WxPusher 推送",
