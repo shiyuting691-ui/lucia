@@ -17,6 +17,9 @@ const courseContext = fs.existsSync(courseContextPath)
 const roleHotposts = fs.existsSync(roleHotpostsPath)
   ? JSON.parse(fs.readFileSync(roleHotpostsPath, "utf8"))
   : { student: [], ip: [], business: [] };
+const runId = process.env.XHS_RUN_ID || "";
+const rotationSeed = process.env.XHS_ROTATION_DATE || runId.slice(0, 10) || new Date().toISOString().slice(0, 10);
+const rotationDayIndex = Math.floor(new Date(`${rotationSeed}T00:00:00Z`).getTime() / 86400000);
 
 const roleNames = {
   student: "学生号",
@@ -39,6 +42,20 @@ const extractKeyword = (post) => {
   if (post.longTailKeyword && post.longTailKeyword !== "小红书热帖") return post.longTailKeyword;
   const keyword = post.notes?.match(/关键词：([^；]+)/)?.[1];
   return keyword || post.topic || post.title;
+};
+
+const hashText = (value) => {
+  let hash = 0;
+  for (const char of String(value)) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash;
+};
+
+const rotateItems = (items, offset) => {
+  if (!items.length) return [];
+  const start = offset % items.length;
+  return [...items.slice(start), ...items.slice(0, start)];
 };
 
 const hasCourseContext = Boolean(
@@ -89,12 +106,14 @@ const precisionNote = (role) => {
 const pickPosts = (role) => {
   const posts = Array.isArray(roleHotposts[role]) ? roleHotposts[role] : [];
   const seen = new Set();
-  return posts.filter((post) => {
+  const uniquePosts = posts.filter((post) => {
     const key = post.url || post.title;
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
-  }).slice(0, 3);
+  });
+  const offset = rotationDayIndex + hashText(role);
+  return rotateItems(uniquePosts, offset).slice(0, 3);
 };
 
 const titleCandidates = {
