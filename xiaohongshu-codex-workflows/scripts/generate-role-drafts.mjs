@@ -118,19 +118,20 @@ const pickPosts = (role) => {
 
 const titleCandidates = {
   student: (post, keyword) => [
+    `${compact(post.title, 24)}，我懂这种崩溃`,
     hasCourseContext ? `${courseContext.courseCode || keyword}这个${courseContext.assessment?.type || "assessment"}我真看不懂` : `${keyword}真的把我整不会了`,
     hasCourseContext ? `${assessmentLabel()}，我现在有点慌` : `有没有人也在被${keyword}折磨`,
-    `${post.title}，我懂这种崩溃`
   ],
   ip: (post, keyword) => [
+    `从“${compact(post.title, 18)}”看，先别急着硬背`,
     hasCourseContext ? `${courseContext.courseCode || keyword}先别急着写，先拆assessment` : `${keyword}，先别急着硬背`,
     hasCourseContext ? `${courseContext.assessment?.type || "assignment"}最容易误判的是评分点` : `final季最容易误判的不是不会，是复习顺序`,
     `从这类爆帖看，留学生最想要的不是鸡血`
   ],
   business: (post, keyword) => [
+    `${compact(post.title, 24)}背后的真实需求拆解`,
     hasCourseContext ? `${courseContext.courseCode || keyword}卡住时，先按这3步排查` : `${keyword}卡住时，先按这3步排查`,
-    `final/essay求助前，先看清楚问题在哪`,
-    `${post.title}背后的真实需求拆解`
+    `final/essay求助前，先看清楚问题在哪`
   ]
 };
 
