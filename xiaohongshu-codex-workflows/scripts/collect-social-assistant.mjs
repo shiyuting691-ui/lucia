@@ -15,6 +15,7 @@ const pythonBin = process.env.XHS_PYTHON_BIN || (fs.existsSync(defaultPython) ? 
 const maxPerFile = toNumber(process.env.SOCIAL_ASSISTANT_MAX_PER_FILE || 30);
 const maxPerRole = toNumber(process.env.SOCIAL_ASSISTANT_MAX_PER_ROLE || 10);
 const minTotalEngagement = toNumber(process.env.SOCIAL_ASSISTANT_MIN_TOTAL || 50);
+const strictQuality = process.env.SOCIAL_ASSISTANT_STRICT_QUALITY !== "false";
 
 const hotpostsPath = path.join(root, "inputs", "hotposts.json");
 const statusPath = path.join(root, "outputs", "collection-social-assistant-status.json");
@@ -40,8 +41,8 @@ const sourceDir = process.env.SOCIAL_ASSISTANT_DIR || defaultSourceDir;
 const extractKeyword = (filePath) => {
   const base = path.basename(filePath, path.extname(filePath));
   const quoted = base.match(/「([^」]+)」/);
-  if (quoted) return quoted[1].trim();
-  return base.replace(/^【社媒助手】/, "").replace(/-\d{8}-\d{4}$/, "").trim();
+  const raw = quoted ? quoted[1].trim() : base.replace(/^【社媒助手】/, "").replace(/-\d{8}-\d{4}$/, "").trim();
+  return raw.replace(/fianl/gi, "final");
 };
 
 const pyCode = String.raw`
@@ -118,6 +119,54 @@ const inferRole = (title, content) => {
   return "ip";
 };
 
+const academicSignal = /final|exam|考试|复习|past paper|lecture|essay|dissertation|assignment|assessment|report|proposal|论文|作业|ddl|deadline|due|ai率|ai rate|aigc|turnitin|reference|referencing|citation|rubric|评分|引用|参考文献|挂科|补考|课程|course|module/i;
+const schoolSignal = /ucl|kcl|lse|cambridge|oxford|warwick|manchester|edinburgh|bristol|durham|leeds|墨大|悉尼|新南|莫纳什|昆士兰|杜伦|曼大|爱丁堡|华威|伦敦政经|剑桥|牛津/i;
+const painSignal = /不会|无从下手|卡|求助|救命|崩溃|焦虑|慌|看不懂|写不完|学不完|ddl|deadline|挂|补救|高风险|ai率/i;
+const methodSignal = /攻略|方法|秘诀|避坑|经验|复盘|如何|怎么|流程|建议|准备|拆解|模板|清单/i;
+const offTopicSignal = /邮局|骂哭|租房|公寓|房租|降价|签证|旅游|机票|超市|做饭|穿搭|恋爱|吵架|外卖|打工|vlog|日常碎片|难看|聪明又难看|官网了|太卷了$/i;
+const concreteAcademicSignal = /essay|dissertation|assignment|assessment|report|proposal|论文|作业|final|exam|考试|复习|past paper|lecture|ddl|deadline|ai率|turnitin|reference|rubric|评分|引用|挂科|补考/i;
+
+const contentQuality = ({ title, content }) => {
+  const text = `${title} ${content}`.replace(/\s+/g, " ").trim();
+  let score = 0;
+  const reasons = [];
+
+  if (academicSignal.test(text)) {
+    score += 3;
+    reasons.push("academic");
+  }
+  if (schoolSignal.test(text)) {
+    score += 1;
+    reasons.push("school");
+  }
+  if (painSignal.test(text)) {
+    score += 1;
+    reasons.push("pain");
+  }
+  if (methodSignal.test(text)) {
+    score += 1;
+    reasons.push("method");
+  }
+  if (offTopicSignal.test(text)) {
+    score -= 4;
+    reasons.push("off_topic");
+  }
+  if (String(title || "").trim().length <= 4 && !academicSignal.test(text)) {
+    score -= 2;
+    reasons.push("thin_title");
+  }
+  if (String(title || "").trim().length <= 5 && !concreteAcademicSignal.test(title)) {
+    score -= 2;
+    reasons.push("weak_short_title");
+  }
+
+  return {
+    ok: !strictQuality || (academicSignal.test(text) && score >= 3 && !reasons.includes("weak_short_title")),
+    score,
+    reasons
+  };
+};
+
 const roleSignals = {
   student: {
     funnel: "upstream",
@@ -164,6 +213,7 @@ const normalizeRow = (row, defaults) => {
   const totalEngagement = likes + favorites + comments + shares;
   const hotScore = likes + favorites * 1.5 + comments * 2 + shares * 1.2;
   const safeTitle = title || content.slice(0, 40) || noteId || "未命名社媒助手笔记";
+  const quality = contentQuality({ title: safeTitle, content });
 
   const baseHotpost = normalizeHotpost(
     {
@@ -201,6 +251,7 @@ const normalizeRow = (row, defaults) => {
       ip: roleFit({ title: safeTitle, content, likes, comments, favorites, shares }, "ip"),
       business: roleFit({ title: safeTitle, content, likes, comments, favorites, shares }, "business")
     },
+    quality,
     hotpost: baseHotpost
   };
 };
@@ -224,16 +275,20 @@ for (const filePath of files) {
       .filter((item) => item.hotpost.title && (item.hotpost.url || item.hotpost.title))
       .sort((a, b) => b.hotScore - a.hotScore);
 
-    const eligible = ranked.filter((item) => item.totalEngagement >= minTotalEngagement);
-    const selected = (eligible.length ? eligible : ranked).slice(0, maxPerFile);
+    const qualityRanked = ranked
+      .filter((item) => item.quality.ok)
+      .sort((a, b) => (b.quality.score - a.quality.score) || (b.hotScore - a.hotScore));
+    const rejectedByQuality = ranked.length - qualityRanked.length;
+    const eligible = qualityRanked.filter((item) => item.totalEngagement >= minTotalEngagement);
+    const selected = (eligible.length ? eligible : qualityRanked).slice(0, maxPerFile);
     const roleSelected = Object.fromEntries(
       Object.keys(roleBuckets).map((role) => {
         const signal = roleSignals[role];
-        const eligibleForRole = ranked.filter((item) => {
+        const eligibleForRole = qualityRanked.filter((item) => {
           const text = `${item.hotpost.title} ${item.content}`;
           return signal.include.test(text) && !signal.exclude.test(text);
         });
-        const source = eligibleForRole.length ? eligibleForRole : ranked;
+        const source = eligibleForRole.length ? eligibleForRole : qualityRanked;
         const items = source
           .filter((item) => item.totalEngagement >= minTotalEngagement || source.length <= maxPerRole)
           .map((item) => ({
@@ -244,7 +299,9 @@ for (const filePath of files) {
               accountRole: role,
               searchFunnel: roleSignals[role].funnel,
               sourceContent: item.content,
-              notes: `${item.hotpost.notes}；账号SOP：${role}；角色匹配分：${item.roleScores[role]}`
+              qualityScore: item.quality.score,
+              qualityReasons: item.quality.reasons,
+              notes: `${item.hotpost.notes}；账号SOP：${role}；角色匹配分：${item.roleScores[role]}；质量分：${item.quality.score}；质量原因：${item.quality.reasons.join("/")}`
             }
           }))
           .sort((a, b) => b.roleScore - a.roleScore)
@@ -261,6 +318,7 @@ for (const filePath of files) {
       keyword,
       rowCount: rows.length,
       selectedCount: selected.length,
+      rejectedByQuality,
       roleSelected,
       topScore: selected[0]?.hotScore || 0,
       topTitle: selected[0]?.hotpost.title || "",
@@ -295,8 +353,10 @@ const status = {
     maxPerFile,
     maxPerRole,
     minTotalEngagement,
+    strictQuality,
     hotScore: "likes + favorites*1.5 + comments*2 + shares*1.2",
-    roleScore: "按学生号/IP号/业务号 SOP 关键词、搜索阶段、互动结构分别加权"
+    roleScore: "按学生号/IP号/业务号 SOP 关键词、搜索阶段、互动结构分别加权",
+    qualityScore: "必须命中留学学术/考试/作业/AI率/DDL等业务相关信号；租房、邮局、纯生活吐槽等高互动内容不进入发布池"
   },
   roleBuckets: Object.fromEntries(
     Object.entries(roleBuckets).map(([role, items]) => [role, {
@@ -324,7 +384,8 @@ const report = [
   `- 默认总互动门槛：${minTotalEngagement}`,
   "- 热度分：点赞 + 收藏*1.5 + 评论*2 + 分享*1.2",
   "- 角色匹配：学生号看情绪/求助/IP号看方法/经验/业务号看明确需求/案例。",
-  "- 如果某个表没有达到门槛的内容，会自动取该表热度分最高的内容，避免空跑。",
+  "- 质量门槛：必须命中留学学术/考试/作业/AI率/DDL等业务相关信号；邮局、租房、公寓、纯生活吐槽等高互动内容不进入三账号发布池。",
+  "- 如果某个表没有足够的合格内容，会少出或不出对应账号内容，避免硬凑。",
   "",
   "## 按账号 SOP 的爆帖池",
   "",
@@ -342,7 +403,7 @@ const report = [
   ...(parsedByFile.length
     ? parsedByFile.map((item) => {
         const suffix = item.ok
-          ? `行数 ${item.rowCount}，入围 ${item.selectedCount}，最高分 ${Number(item.topScore || 0).toFixed(1)}${item.topTitle ? `，Top：${item.topTitle}` : ""}`
+          ? `行数 ${item.rowCount}，入围 ${item.selectedCount}，质量剔除 ${item.rejectedByQuality || 0}，最高分 ${Number(item.topScore || 0).toFixed(1)}${item.topTitle ? `，Top：${item.topTitle}` : ""}`
           : `失败：${item.error}`;
         return `- ${item.ok ? "OK" : "FAIL"} ${item.file}：${suffix}`;
       })

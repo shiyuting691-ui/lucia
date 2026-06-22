@@ -38,10 +38,23 @@ const compact = (text = "", limit = 120) => {
   return value.length > limit ? `${value.slice(0, limit)}...` : value;
 };
 
+const normalizeKeyword = (value = "") => String(value || "")
+  .replace(/fianl/gi, "final")
+  .replace(/\s+/g, " ")
+  .trim();
+
 const extractKeyword = (post) => {
   if (post.longTailKeyword && post.longTailKeyword !== "小红书热帖") return post.longTailKeyword;
   const keyword = post.notes?.match(/关键词：([^；]+)/)?.[1];
-  return keyword || post.topic || post.title;
+  return normalizeKeyword(keyword || post.topic || post.title);
+};
+
+const academicSignal = /final|exam|考试|复习|past paper|lecture|essay|dissertation|assignment|assessment|report|proposal|论文|作业|ddl|deadline|due|ai率|ai rate|aigc|turnitin|reference|referencing|citation|rubric|评分|引用|参考文献|挂科|补考|课程|course|module/i;
+const offTopicSignal = /邮局|骂哭|租房|公寓|房租|降价|签证|旅游|机票|超市|做饭|穿搭|恋爱|吵架|外卖|打工|vlog|日常碎片|难看|聪明又难看|官网了|太卷了$/i;
+
+const isRelevantPost = (post) => {
+  const text = [post.title, post.sourceContent, post.topic, post.longTailKeyword, post.notes].filter(Boolean).join(" ");
+  return academicSignal.test(text) && !offTopicSignal.test(text);
 };
 
 const hashText = (value) => {
@@ -110,7 +123,7 @@ const pickPosts = (role) => {
     const key = post.url || post.title;
     if (!key || seen.has(key)) return false;
     seen.add(key);
-    return true;
+    return isRelevantPost(post);
   });
   const offset = rotationDayIndex + hashText(role);
   return rotateItems(uniquePosts, offset).slice(0, 3);
@@ -118,20 +131,19 @@ const pickPosts = (role) => {
 
 const titleCandidates = {
   student: (post, keyword) => [
-    `${compact(post.title, 24)}，我懂这种崩溃`,
-    hasCourseContext ? `${courseContext.courseCode || keyword}这个${courseContext.assessment?.type || "assessment"}我真看不懂` : `${keyword}真的把我整不会了`,
-    hasCourseContext ? `${assessmentLabel()}，我现在有点慌` : `有没有人也在被${keyword}折磨`,
+    hasCourseContext ? `${courseContext.courseCode || keyword}这个${courseContext.assessment?.type || "assessment"}我真看不懂` : `${keyword}前几天，我真的有点慌`,
+    hasCourseContext ? `${assessmentLabel()}，我现在不知道先救哪块` : `${keyword}复习/写作卡住时，先救哪一块`,
+    hasCourseContext ? `${courseContext.courseCode || keyword}有没有同课的人也卡住` : `有没有人也在被${keyword}折磨`,
   ],
   ip: (post, keyword) => [
-    `从“${compact(post.title, 18)}”看，先别急着硬背`,
-    hasCourseContext ? `${courseContext.courseCode || keyword}先别急着写，先拆assessment` : `${keyword}，先别急着硬背`,
+    hasCourseContext ? `${courseContext.courseCode || keyword}先别急着写，先拆assessment` : `${keyword}别先硬背，先拆这3件事`,
     hasCourseContext ? `${courseContext.assessment?.type || "assignment"}最容易误判的是评分点` : `final季最容易误判的不是不会，是复习顺序`,
-    `从这类爆帖看，留学生最想要的不是鸡血`
+    `留学生最需要的不是鸡血，是下一步判断`
   ],
   business: (post, keyword) => [
-    `${compact(post.title, 24)}背后的真实需求拆解`,
     hasCourseContext ? `${courseContext.courseCode || keyword}卡住时，先按这3步排查` : `${keyword}卡住时，先按这3步排查`,
-    `final/essay求助前，先看清楚问题在哪`
+    `final/essay求助前，先看清楚问题在哪`,
+    `DDL、AI率、rubric卡住时，先做风险排查`
   ]
 };
 
@@ -324,7 +336,7 @@ const bodyFactories = {
   student: (post, inspirations, keyword) => [
     hasCourseContext
       ? `我现在真的卡在${courseLabel()}这个${courseContext.assessment?.type || "assessment"}上了。`
-      : `今天刷到“${post.title}”，真的很像我最近在${keyword}里那种卡住的状态。`,
+      : `最近刷到很多${keyword}相关内容，真的很像我这几天那种卡住的状态。`,
     "",
     hasCourseContext
       ? `明明brief也打开了，${assessmentLabel() || "ddl/要求"}也看到了，但就是越看越不知道第一步该干嘛。`
@@ -342,7 +354,7 @@ const bodyFactories = {
       ? "3. 一想到后面可能还要改格式/引用/结构，就直接想把电脑合上。"
       : "3. 明知道要开始，但一坐下来就想逃避。",
     "",
-    `刚好又刷到“${inspirations[1]?.title || post.title}”这种帖子，感觉大家表面都在开玩笑，其实背后都快碎了。`,
+    "刷到那些final/essay求助帖的时候，感觉大家表面都在开玩笑，其实背后都快碎了。",
     "",
     hasCourseContext
       ? `有没有同课/同类型assessment的人，你们第一步是怎么开始的？`
@@ -355,7 +367,7 @@ const bodyFactories = {
     "",
     hasCourseContext
       ? `先把${assessmentLabel() || "assessment要求"}拆清楚，再决定先救哪一块，不然很容易越做越散。`
-      : `比如“${post.title}”这种标题，第一眼就让人知道：这是一个真实场景，不是空泛鸡汤。`,
+      : "对final/essay阶段来说，最怕的是只表达焦虑，但没有说清楚到底卡在题目、资料、结构还是时间。",
     "",
     "我会先拆成 3 层：",
     "",
@@ -369,7 +381,7 @@ const bodyFactories = {
       ? "3. 最后倒推DDL：先完成能交的结构，再补证据和表达。"
       : "3. 最后给一个小判断。让读者知道自己下一步该先看哪里。",
     "",
-    `这也是为什么“${inspirations[1]?.title || post.title}”这类内容容易被互动：它不是标准答案，而是替读者说出了一个具体困境。`,
+    "这也是为什么具体卡点型内容更容易被互动：它不是标准答案，而是替读者说出了一个真实困境。",
     "",
     "你现在更像是时间不够、方向不清，还是已经开始做但做不下去？"
   ],
@@ -380,7 +392,7 @@ const bodyFactories = {
     "",
     hasCourseContext
       ? `当前信息里最关键的是：${assessmentLabel() || "评估方式/DDL/评分点"}。这决定了内容该写成计划、拆题，还是风险排查。`
-      : `像“${post.title}”这类内容之所以容易爆，是因为它背后有明确需求：时间紧、任务重、风险不确定。`,
+      : "这类内容背后的真实需求通常很明确：时间紧、任务重、风险不确定，但学生自己不知道先处理哪一个。",
     "",
     "遇到这类问题，建议先按这个顺序排查：",
     "",
@@ -388,7 +400,7 @@ const bodyFactories = {
     "2. 再确认最紧急风险。是ddl、分数、AI率、引用，还是完全不知道怎么下手。",
     "3. 最后决定处理方式。能局部调整就不要全篇推翻，结构错了才需要重搭。",
     "",
-    `如果只是看“${inspirations[1]?.title || post.title}”的表面情绪，很容易错过真正的需求点。`,
+    "如果只看表面情绪，很容易错过真正的需求点；先判断任务类型和风险，后面才知道该怎么处理。",
     "",
     "你现在卡的是时间安排、题目理解、资料整理，还是正文推进？"
   ]
