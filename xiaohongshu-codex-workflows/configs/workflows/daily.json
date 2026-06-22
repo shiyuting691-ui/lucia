@@ -9,8 +9,7 @@
     "draft:roles",
     "visual:render",
     "publish:roles",
-    "wechat",
-    "push:wechat"
+    "wechat"
   ],
   "expectedOutputs": [
     "outputs/hotpost-analysis.md",
@@ -18,7 +17,6 @@
     "outputs/visual-package.md",
     "outputs/visual-images/manifest.json",
     "outputs/role-publish-ready.md",
-    "outputs/wechat-daily-digest.txt",
-    "outputs/wechat-push-status.json"
+    "outputs/wechat-daily-digest.txt"
   ]
 }
