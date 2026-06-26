@@ -15,6 +15,7 @@ from database import (
     list_orders, list_teacher_capacity, list_order_risks,
     list_market_signals, save_suggestion, save_opportunity_score,
 )
+from services.output_contracts import evidence_from_records, has_real_data, no_data_result
 
 # 加载知识库
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'knowledge_base'))
@@ -32,13 +33,24 @@ logger = logging.getLogger(__name__)
 
 # 产品ID → 覆盖学科范围（用于判断老师资源匹配）
 PRODUCT_SUBJECT_MAP = {
-    "final_prediction": ["商科", "管理", "金融", "经济", "会计", "计算机", "工程", "社科"],
-    "dissertation": ["商科", "社科", "管理", "教育", "法律"],
-    "annual_package": ["商科", "管理", "金融", "经济"],
+    "language_tutoring": ["英语", "语言"],
+    "pse_followup": ["英语", "语言"],
+    "hwept_sprint": ["英语", "语言"],
+    "prestudy": ["商科", "管理", "金融", "经济", "会计", "计算机", "工程", "社科"],
+    "assignment_done": ["商科", "管理", "金融", "经济", "会计", "计算机", "工程", "社科"],
+    "coursework_tutoring": ["商科", "管理", "金融", "经济", "会计", "计算机", "工程", "社科"],
+    "exam_support": ["商科", "管理", "金融", "经济", "会计", "计算机", "工程", "社科"],
+    "prediction": ["商科", "管理", "金融", "经济", "会计", "计算机", "工程", "社科"],
     "guaranteed": ["商科", "管理", "金融", "经济", "会计"],
-    "regular": ["商科", "管理", "金融", "经济", "会计", "计算机", "社科", "教育"],
-    "dp_premium": ["商科", "管理", "金融", "社科"],
-    "ai_compliance": ["商科", "社科", "管理", "教育"],
+    "dissertation_full": ["商科", "社科", "管理", "教育", "法律"],
+    "quality_70": ["商科", "社科", "管理", "教育", "法律"],
+    "ai_reduction": ["商科", "社科", "管理", "教育"],
+    "annual_package": ["商科", "管理", "金融", "经济"],
+    "course_package": ["商科", "管理", "金融", "经济", "会计", "计算机", "社科", "教育"],
+    "dp_excellence": ["商科", "管理", "金融", "社科"],
+    "anxin_package": ["商科", "管理", "金融", "经济", "社科"],
+    "graduation_carefree": ["商科", "社科", "管理", "教育", "法律"],
+    "ai_top_student": ["商科", "社科", "管理", "教育"],
 }
 
 # 高风险学科（老师储备通常不足）
@@ -61,6 +73,8 @@ class ProductSupplyRiskAgent:
         capacities    = list_teacher_capacity()
         risks         = list_order_risks(limit=50)
         signals       = list_market_signals(limit=20)
+        if not has_real_data(recent_orders, capacities, risks, signals):
+            return no_data_result("缺少订单、老师容量、风险或市场信号数据，无法生成产品供给与推广边界")
 
         # 订单分布统计
         product_counter = Counter(o.get("product") for o in recent_orders)
@@ -79,10 +93,12 @@ class ProductSupplyRiskAgent:
             subjects = PRODUCT_SUBJECT_MAP.get(pid, [])
             tight_subjects = []
             ok_subjects    = []
+            evidence = []
 
             for subj in subjects:
                 caps = cap_by_subject.get(subj, [])
                 if caps:
+                    evidence.extend(f"teacher_capacity.subject_area={subj}" for _ in caps[:1])
                     # 找该学科最差资源状态
                     status_order = {"充足": 0, "正常": 1, "紧张": 2, "暂停接单": 3}
                     worst = max(caps, key=lambda c: status_order.get(c.get("capacity_status", "正常"), 1))
@@ -91,17 +107,23 @@ class ProductSupplyRiskAgent:
                     else:
                         ok_subjects.append(subj)
                 else:
-                    ok_subjects.append(subj)  # 无记录视为正常
+                    tight_subjects.append(subj)
 
             order_count = product_counter.get(pid, 0)
+            if order_count:
+                evidence.append(f"orders.product={pid};count={order_count}")
+            product_risks = [r for r in risks if r.get("product") in (pid, info.get("name"))]
+            evidence.extend(evidence_from_records("order_risk_signals", product_risks, limit=3))
+            if not evidence:
+                continue
 
             # 推广等级判断
             if tight_subjects and not ok_subjects:
                 push_level = "pause"
-                reason = f"主要学科老师资源紧张：{'/'.join(tight_subjects)}"
+                reason = f"缺少或存在紧张老师资源记录：{'/'.join(tight_subjects[:3])}"
             elif tight_subjects:
                 push_level = "cautious"
-                reason = f"部分学科老师紧张（{'/'.join(tight_subjects)}），但{'/'.join(ok_subjects[:2])}资源正常"
+                reason = f"部分学科老师记录缺失或紧张（{'/'.join(tight_subjects[:3])}），需先确认档期"
             elif order_count > 20:
                 push_level = "strong"
                 reason = f"近{period_days}天订单{order_count}单，需求旺盛，老师资源充足"
@@ -110,12 +132,7 @@ class ProductSupplyRiskAgent:
                 reason = f"近{period_days}天订单{order_count}单，正常推广"
             else:
                 push_level = "normal"
-                reason = "老师资源正常，可按季节性推广"
-
-            # Final押题：6月期末冲刺季特殊规则
-            if pid == "final_prediction" and not tight_subjects:
-                push_level = "strong"
-                reason = "6月期末冲刺季，商科/管理类老师资源充足，是强推窗口"
+                reason = f"近{period_days}天订单{order_count}单，容量证据存在，正常推广"
 
             promotion_boundary.append({
                 "product":              info["name"],
@@ -123,11 +140,12 @@ class ProductSupplyRiskAgent:
                 "can_push":             push_level not in ("pause",),
                 "push_level":           push_level,
                 "reason":               reason,
-                "sales_note":           f"{'需学管确认交付能力，' if tight_subjects else ''}使用标准话术",
+                "sales_note":           f"{'需销售/顾问/学管确认交付能力，' if tight_subjects else ''}使用标准话术",
                 "marketing_note":       f"{'不建议大范围投放，' if push_level in ('cautious','pause') else ''}内容主题聚焦真实卖点",
-                "academic_support_note":f"{'需先评估老师档期' if tight_subjects else '资源充足可直接接单'}",
+                "academic_support_note":f"{'需先评估老师档期' if tight_subjects else '有容量记录，可继续接单'}",
                 "tight_subjects":       tight_subjects,
                 "ok_subjects":          ok_subjects[:3],
+                "evidence":             evidence,
             })
 
         # ── 阶段订单风险汇总 ──────────────────────────────────────
@@ -184,7 +202,7 @@ class ProductSupplyRiskAgent:
 
         dept_actions = [
             {
-                "department": "推广部",
+                "department": "推广/市场",
                 "actions": [
                     f"重点铺设 {p['product']} 相关内容（{p['reason'][:40]}）"
                     for p in strong_products[:2]
@@ -194,17 +212,17 @@ class ProductSupplyRiskAgent:
                 ],
             },
             {
-                "department": "顾问",
+                "department": "销售/顾问/学管",
                 "actions": [
                     f"优先推广 {p['product']}，{p['sales_note']}"
                     for p in strong_products[:2]
                 ] + [
-                    f"推广 {p['product']} 前先联系学管确认老师档期"
+                    f"推广 {p['product']} 前先由销售/顾问/学管确认老师档期"
                     for p in cautious_products[:1]
                 ],
             },
             {
-                "department": "学管",
+                "department": "销售/顾问/学管",
                 "actions": [
                     "反馈本周各学科老师可接单数量",
                     "标记高风险订单（DDL 48小时内、计算类复杂考试）",
@@ -240,7 +258,17 @@ class ProductSupplyRiskAgent:
             suggestion_type="product_supply_risk",
             title=f"产品供给与订单风险分析（近{period_days}天）",
             content=json.dumps(result, ensure_ascii=False, indent=2),
-            data_basis={"order_count": len(recent_orders), "period_days": period_days},
+            data_basis={
+                "order_count": len(recent_orders),
+                "period_days": period_days,
+                "evidence": (
+                    evidence_from_records("orders", recent_orders, limit=5)
+                    + evidence_from_records("teacher_capacity", capacities, limit=5)
+                    + evidence_from_records("order_risk_signals", risks, limit=5)
+                ),
+                "confidence": "medium" if promotion_boundary else "low",
+                "responsible_role": "产品/后台",
+            },
             priority="high",
         )
 

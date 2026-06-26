@@ -42,8 +42,27 @@ from database import (
     update_task_extended, get_task_execution_stats,
     save_agent_run, list_agent_runs, get_agent_last_runs,
     save_agent_feedback, list_agent_feedbacks,
+    # V10 三层需求预测
+    list_demand_forecast_signals, list_school_academic_calendars,
+    list_course_assessments_v2, list_major_demand_profiles,
 )
 from database.models import TASK_TYPES
+from services.guardrails import (
+    NO_DATA_MESSAGE,
+    catalog_product_options,
+    normalize_role,
+    validate_ai_output,
+    validate_product,
+)
+
+
+# ══════════════════════════════════════════
+# Helper：过滤无效学校名
+# ══════════════════════════════════════════
+
+def _is_valid_school(s):
+    """过滤掉无效学校名"""
+    return bool(s) and s not in ('未知', '未知学校', '未知（学生不愿意说）', 'None', '—', '未填写')
 
 
 # ══════════════════════════════════════════
@@ -213,6 +232,17 @@ st.markdown("""
 }
 .empty-card-title { font-size: 16px; font-weight: 700; color: #92400e; margin-bottom: 8px; }
 .empty-card-desc  { font-size: 14px; color: #78350f; margin-bottom: 0; }
+.status-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px 18px;
+    min-height: 132px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.05);
+}
+.status-card-title { font-size: 14px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+.status-card-body { font-size: 13px; color: #4b5563; line-height: 1.55; }
+.status-card-foot { font-size: 12px; color: #64748b; margin-top: 10px; }
 
 /* ── 内容列表行 ── */
 .content-row {
@@ -338,8 +368,9 @@ def render_empty_state(title: str, desc: str, btn_label: str = "", btn_page: str
       <div class="empty-card-desc">{desc}</div>
     </div>""", unsafe_allow_html=True)
     if btn_label and btn_page:
-        if st.button(btn_label, type="primary"):
+        if st.button(btn_label, type="primary", key=f"goto_{btn_page}_{btn_label}"):
             st.session_state["_goto"] = btn_page
+            st.rerun()
 
 # ── 数据库初始化 ──────────────────────────
 @st.cache_resource
@@ -363,21 +394,275 @@ TYPE_ZH = {
     "product_promotion":"📢产品推广", "risk_notice":"⚠️风控提醒",
     "strategy_suggestion":"🧭战略建议",
 }
-PRODUCT_ZH = {
-    "regular":          "常规辅导",
-    "annual_package":   "学年包",
-    "guaranteed":       "包过辅导",
-    "dissertation":     "DP论文辅导",
-    "b2b":              "对公合作",
-    "final_prediction": "Final精准押题",
-    "dp_premium":       "DP高端服务",
-    "ai_learning":      "AI合规学习",
-    "ai_compliance":    "AI合规学习",
+_CATALOG_PRODUCTS = catalog_product_options()
+PRODUCT_ZH = {p["id"]: p["name"] for p in _CATALOG_PRODUCTS}
+PRODUCT_BY_NAME = {p["name"]: p["id"] for p in _CATALOG_PRODUCTS}
+
+# ── 产品目录（按客户问题分类）──────────────────────────────
+PRODUCT_CATALOG = {
+    "语言班/雅思不够": [
+        {
+            "name": "语言班辅导",
+            "fit": "语言班在读、雅思成绩不达标需要补救",
+            "not_fit": "已经通过语言要求的学生",
+            "problem": "语言班课程跟不上，成绩不达标，无法升入正式课程",
+            "price_logic": "按课程数量/学时定价，通常1-3k/月",
+            "service_boundary": "辅导语言班课程，不包含雅思备考",
+            "sales_script": "语言班跟不上很正常，很多同学第一年都有这个问题，我们有专门的老师一对一帮你跟课，让你顺利过关升入正式课程",
+            "objection": {"价格高": "语言班不过关要重读费用更高，投入产出比反而更合算", "不确定效果": "我们有历史通过率数据，可以给你看"},
+            "related": ["PSE跟课", "HWEPT冲刺", "开学前预习课"],
+            "delivery_risk": "学生学习态度、出勤率影响效果",
+        },
+        {
+            "name": "PSE跟课",
+            "fit": "澳洲大学PSE课程在读学生",
+            "not_fit": "非PSE课程学生",
+            "problem": "PSE课程难度超预期，无法独立完成任务",
+            "price_logic": "按学期定价，通常2-5k/学期",
+            "service_boundary": "全程跟课辅导，不保证成绩",
+            "sales_script": "PSE是很多中国学生的第一道坎，我们有专门做PSE的老师，可以全程陪你一起过",
+            "objection": {"已有家教": "家教和我们不一样，我们有系统的PSE经验和资料"},
+            "related": ["语言班辅导", "开学前预习课"],
+            "delivery_risk": "课程变化、老师资源紧张",
+        },
+        {
+            "name": "HWEPT冲刺",
+            "fit": "需要通过HWEPT考试的学生",
+            "not_fit": "不需要HWEPT的学校/专业",
+            "problem": "HWEPT考试没把握，需要针对性备考",
+            "price_logic": "按考试批次定价，1-3k/次",
+            "service_boundary": "针对HWEPT考试的专项备考，不包含语言班辅导",
+            "sales_script": "HWEPT是一次性的机会，备考要有系统方法，我们有专门的真题和备考方案",
+            "objection": {"自己能准备": "HWEPT有特定考察维度，需要有人指导才效率高"},
+            "related": ["语言班辅导", "PSE跟课"],
+            "delivery_risk": "考试日期临近时供给紧张",
+        },
+    ],
+    "开学前预习": [
+        {
+            "name": "开学前预习课",
+            "fit": "即将入学、想提前熟悉课程内容的学生",
+            "not_fit": "已经在读、课程已开始的学生",
+            "problem": "担心开学跟不上、第一学期表现差",
+            "price_logic": "按科目/课程数量定价，500-2k/科",
+            "service_boundary": "开学前1-3个月预习，不包含正式辅导",
+            "sales_script": "提前预习的学生开学后成绩通常比没预习的高10-15分，给自己一个好开头",
+            "objection": {"没必要": "第一学期成绩影响GPA基础，值得投资"},
+            "related": ["作业委托", "安心包"],
+            "delivery_risk": "课程内容变化、老师没有对应学校资料",
+        },
+    ],
+    "作业": [
+        {
+            "name": "作业委托",
+            "fit": "有作业完成需求、时间紧张的学生",
+            "not_fit": "只需要辅导不需要代做的学生",
+            "problem": "作业deadline临近，没时间或没能力完成",
+            "price_logic": "按作业类型/字数/难度定价，几百到几千不等",
+            "service_boundary": "代写完成，质量保障，不保证成绩",
+            "sales_script": "我们有各专业的资深老师，可以在deadline前高质量完成",
+            "objection": {"担心查重": "我们有专业的降重处理，通过率高"},
+            "related": ["70+质检", "降AI率", "Essay写作"],
+            "delivery_risk": "时间太紧、专业匹配度",
+        },
+        {
+            "name": "Essay写作",
+            "fit": "需要Essay类作业的学生",
+            "not_fit": "理工科计算题类作业",
+            "problem": "Essay写作能力不足、逻辑不清晰、引用格式不规范",
+            "price_logic": "按字数定价，通常200-400元/千字",
+            "service_boundary": "提供完整Essay，包含格式规范",
+            "sales_script": "Essay是留学生最常见的作业形式，我们有专门做各类Essay的写手团队",
+            "objection": {"太贵": "和挂科补考的代价比，这个投入很合理"},
+            "related": ["70+质检", "降AI率", "作业委托"],
+            "delivery_risk": "主题太偏、资料不足",
+        },
+        {
+            "name": "70+质检",
+            "fit": "对成绩有要求、想确保质量的学生",
+            "not_fit": "只要能交就行、不在乎分数的",
+            "problem": "担心作业质量不达标，分数不理想",
+            "price_logic": "在原服务基础上加价20-30%",
+            "service_boundary": "提供成绩保障，不达70分可部分退款或免费修改",
+            "sales_script": "多一点点投入，换来的是确定性的结果，很多同学都选这个",
+            "objection": {"多花了钱": "70+质检相当于给作业买了保险，很值"},
+            "related": ["作业委托", "Essay写作"],
+            "delivery_risk": "成绩评定主观性强、老师评分标准不同",
+        },
+        {
+            "name": "降AI率",
+            "fit": "使用AI辅助创作、担心被查出的学生",
+            "not_fit": "完全不用AI的学生",
+            "problem": "AI率过高，担心被学校处分",
+            "price_logic": "按字数定价，通常100-300元/千字",
+            "service_boundary": "降低AI检测率，不保证100%通过",
+            "sales_script": "现在很多学校开始检测AI率，风险很大，我们可以帮你处理到安全范围",
+            "objection": {"没问题的": "现在AI检测工具越来越厉害，不值得冒这个险"},
+            "related": ["作业委托", "Essay写作"],
+            "delivery_risk": "检测工具持续更新、学校政策变化",
+        },
+    ],
+    "考试": [
+        {
+            "name": "考试助力",
+            "fit": "有考试临近、需要针对性复习的学生",
+            "not_fit": "考试还早、不需要针对复习的",
+            "problem": "考试临近没把握，需要快速提分",
+            "price_logic": "按课程/考试定价，通常500-2k/门",
+            "service_boundary": "考前辅导和复习资料，不包含代考",
+            "sales_script": "考试最后两周的针对性复习效果最好，我们有历年真题和解题思路",
+            "objection": {"时间不够": "我们可以根据你剩余的时间制定最优复习方案"},
+            "related": ["押题", "包过辅导"],
+            "delivery_risk": "时间太短、学生基础太差",
+        },
+        {
+            "name": "Final精准押题",
+            "fit": "Final考试前1-2周的学生",
+            "not_fit": "平时作业，非Final时期",
+            "problem": "Final范围太广，不知道重点在哪",
+            "price_logic": "按课程定价，通常300-1k/门",
+            "service_boundary": "提供高概率考点预测，不保证押中",
+            "sales_script": "我们分析了大量历年真题，命中率很高，很多同学都靠这个过关",
+            "objection": {"押不中怎么办": "命中率有数据，同时押题也帮你系统复习了"},
+            "related": ["考试助力", "包过辅导"],
+            "delivery_risk": "出题老师变化、考题随机性",
+        },
+        {
+            "name": "包过辅导",
+            "fit": "有明确过线要求、愿意投入的学生",
+            "not_fit": "追求高分、不是只求过线的",
+            "problem": "害怕挂科补考或被退学",
+            "price_logic": "按课程收费，通常比普通辅导贵50-100%",
+            "service_boundary": "辅导+质保，不过退部分款",
+            "sales_script": "包过套餐最大的价值是给你确定性，不用担心补考的麻烦和额外费用",
+            "objection": {"太贵了": "算上可能的补考费用和重读代价，包过其实很划算"},
+            "related": ["考试助力", "Final精准押题"],
+            "delivery_risk": "学生不配合复习、基础太差",
+        },
+    ],
+    "论文": [
+        {
+            "name": "Dissertation全流程",
+            "fit": "本科毕业论文、硕士学位论文需要全程支持的学生",
+            "not_fit": "只需要局部帮助的学生",
+            "problem": "Dissertation体量大、周期长、不知道如何规划和推进",
+            "price_logic": "按章节/总字数定价，通常1-3万",
+            "service_boundary": "从开题到定稿，全程辅导和代写支持",
+            "sales_script": "Dissertation是留学生最大的挑战，从选题到答辩，我们陪你走完全程",
+            "objection": {"太贵": "Dissertation决定你的学位，这是最值得投资的地方"},
+            "related": ["70+质检", "降AI率", "毕业无忧"],
+            "delivery_risk": "导师要求变化、中途换题、时间紧张",
+        },
+        {
+            "name": "毕业无忧",
+            "fit": "面临毕业风险、学分不足或Dissertation受阻的学生",
+            "not_fit": "学业正常、没有毕业风险的",
+            "problem": "面临无法按时毕业的风险",
+            "price_logic": "综合服务包，定制报价，通常2-5万",
+            "service_boundary": "全面评估+针对性解决方案，不保证100%毕业",
+            "sales_script": "毕业是最重要的事，一旦出现风险要尽快应对，我们帮你全面评估和制定方案",
+            "objection": {"已经没救了": "只要还有时间，就有可能解决，我们见过更难的情况"},
+            "related": ["Dissertation全流程", "包过辅导"],
+            "delivery_risk": "学校政策、时间窗口极短",
+        },
+    ],
+    "挂科/毕业风险": [
+        {
+            "name": "安心包",
+            "fit": "有多门课程、担心学业风险的学生",
+            "not_fit": "只有单门需求的学生",
+            "problem": "多门课程同时有压力，担心顾此失彼",
+            "price_logic": "按学期整体套餐定价，通常5-15k/学期",
+            "service_boundary": "多课程协同辅导，优先级排序，不保证每门成绩",
+            "sales_script": "安心包的好处是你不用每次都来谈，我们帮你统筹安排，一个价搞定整个学期",
+            "objection": {"不需要这么多": "很多同学觉得只需要一两门，但学期中途总会突然有新需求"},
+            "related": ["DP卓越安心包", "学年包", "毕业无忧"],
+            "delivery_risk": "课程超出覆盖范围、老师资源不足",
+        },
+        {
+            "name": "DP卓越安心包",
+            "fit": "DP项目学生，有高分和稳定性双重需求",
+            "not_fit": "非DP项目",
+            "problem": "DP课程要求高，需要全方位支持",
+            "price_logic": "专属DP定价，通常高于普通安心包20-30%",
+            "service_boundary": "覆盖DP全部课程，重点科目重点保障",
+            "sales_script": "DP项目是极致专长，我们有专门做DP的团队，口碑很好",
+            "objection": {"普通安心包也能做": "DP有特殊要求，专业团队更有保障"},
+            "related": ["安心包", "学年包"],
+            "delivery_risk": "DP难度高、老师资源有限",
+        },
+    ],
+    "高分需求": [
+        {
+            "name": "Assignment辅导",
+            "fit": "想提升作业质量、追求高分的学生",
+            "not_fit": "只求通过、不在意分数的",
+            "problem": "自己写的作业不够好，想有人辅导提升",
+            "price_logic": "按次/按学时定价，通常200-500元/小时",
+            "service_boundary": "辅导指导，不代写",
+            "sales_script": "我们的辅导不是帮你写，是帮你理解怎么写好，这样每次都能进步",
+            "objection": {"只要完成就行": "现在的习惯决定你以后的GPA，值得投入"},
+            "related": ["Essay写作", "70+质检"],
+            "delivery_risk": "学生积极性、时间配合度",
+        },
+    ],
+    "长期托管": [
+        {
+            "name": "学年包",
+            "fit": "想整个学年都有保障的学生或家长",
+            "not_fit": "只有短期单次需求的学生",
+            "problem": "每次临时找人麻烦，想要稳定的全年支持",
+            "price_logic": "按学年整体定价，打折幅度大，通常20-50k/学年",
+            "service_boundary": "全学年覆盖，固定老师团队，优先响应",
+            "sales_script": "学年包是最省心的选择，整个学年一个固定团队跟着你，不用每次重新找人",
+            "objection": {"太贵了": "摊到每次的成本其实比单次买更便宜，而且有固定的人服务质量更好"},
+            "related": ["安心包", "包课"],
+            "delivery_risk": "学生转学、休学、专业变化",
+        },
+        {
+            "name": "包课",
+            "fit": "按课程批量购买服务的学生",
+            "not_fit": "按次购买更合适的学生",
+            "price_logic": "按课程数量折扣，5-10门课有优惠",
+            "service_boundary": "固定课程范围内的全部支持",
+            "sales_script": "包课比单买便宜，而且你这学期的课都定好了，可以一次性解决",
+            "objection": {"不确定用多少": "可以先包核心几门，其他按需补充"},
+            "related": ["学年包", "安心包"],
+            "delivery_risk": "课程实际内容与预期不符",
+        },
+    ],
+    "AI学习提升": [
+        {
+            "name": "AI学霸成长包",
+            "fit": "想用AI工具提升学习效率、同时规避风险的学生",
+            "not_fit": "完全排斥AI、或已被处分的学生",
+            "problem": "不知道如何合规地使用AI工具辅助学习",
+            "price_logic": "按套餐定价，通常1-3k",
+            "service_boundary": "AI工具使用培训+合规写作技巧，不代写",
+            "sales_script": "AI是未来的方向，关键是要用对方式，我们教你怎么合规用AI让学习更高效",
+            "objection": {"自己会用": "合规使用AI有很多技巧，我们的方法可以让你事半功倍"},
+            "related": ["降AI率", "Assignment辅导"],
+            "delivery_risk": "学校政策变化、学生自律性",
+        },
+    ],
 }
-DEPT_OPTIONS = ["推广部","顾问","学管","后台","管理层"]
-FEEDBACK_TYPES = ["后台问题","顾问异议","客户需求变化","学管交付风险",
+
+# 渠道清单
+CHANNELS = ["小红书", "垂直号", "朋友圈", "社群", "老客户转介绍", "代理渠道"]
+
+# 统一角色
+ROLES = {
+    "🎯 管理层": "管理层",
+    "📢 推广/市场": "推广/市场",
+    "💼 销售/顾问/学管": "销售/顾问/学管",
+    "📦 产品/后台": "产品/后台",
+    "⚙️ 系统管理": "系统",
+}
+
+DEPT_OPTIONS = ["管理层", "推广/市场", "销售/顾问/学管", "产品/后台", "交付/老师"]
+FEEDBACK_TYPES = ["产品问题","销售异议","客户需求变化","后端交付风险",
                   "老师资源紧张","学校课程难度变化","价格问题","售后问题","其他"]
-SUGGESTION_TYPES = ["后台维护","增长机会","顾问策略","推广策略",
+SUGGESTION_TYPES = ["产品优化","市场机会","销售策略","推广策略",
                     "风控提醒","资源配置","新产品机会"]
 URGENCY_OPTIONS = ["低","中","高","紧急"]
 PRIORITY_OPTIONS = ["低","中","高","紧急"]
@@ -397,38 +682,734 @@ def _tag(status: str):
            "used":"tag-used","rejected":"tag-high","archived":"tag-archived"}.get(status,"tag-draft")
     return f'<span class="{cls}">{STATUS_ZH.get(status,status)}</span>'
 
+ROLE_PAGES = {
+    "🎯 管理层": [
+        "📊 老板驾驶舱",
+        "🔮 增长预测台",
+        "🚀 新产品上线台",
+        "🚦 产品红绿灯",
+        "📈 归因分析台",
+        "✅ 部门任务台",
+        "🔁 每周复盘台",
+    ],
+    "📢 推广/市场": [
+        "📡 渠道作战台",
+        "📡 市场情报台",
+        "🏫 学校增长情报台",
+        "📈 产品推广策略台",
+        "🎯 广告预测台",
+        "📅 营销日历",
+        "📝 内容池",
+    ],
+    "💼 销售/顾问/学管": [
+        "💼 销售顾问作战台",
+        "📦 产品目录与推荐台",
+        "🗣️ 产品反馈台",
+        "✅ 部门任务台",
+    ],
+    "📦 产品/后台": [
+        "🚀 新产品上线台",
+        "📦 产品目录与推荐台",
+        "🧭 战略建议台",
+        "📚 公司资料学习中心",
+        "📈 归因分析台",
+    ],
+    "⚙️ 系统管理": [
+        "🛠 Agent管理中心",
+        "🤖 自动化工作流",
+        "📁 数据资料中心",
+        "🔧 系统诊断台",
+        "✅ 执行监督台",
+    ],
+}
+
+ROLE_SECTION_LABELS = {
+    "🎯 管理层": "决策中心",
+    "📢 推广/市场": "推广作战",
+    "💼 销售/顾问/学管": "销售转化",
+    "📦 产品/后台": "产品管理",
+    "⚙️ 系统管理": "系统配置",
+}
+
+_requested_page = st.session_state.pop("_goto", None) or st.session_state.pop("page_jump", None)
+if _requested_page:
+    for _role_name, _role_pages in ROLE_PAGES.items():
+        if _requested_page in _role_pages:
+            st.session_state["active_role"] = _role_name
+            st.session_state[f"nav_{_role_name}"] = _requested_page
+            break
+
 # ── 侧边栏 ────────────────────────────────
 with st.sidebar:
     st.markdown("""
     <div style="padding:12px 0 4px 0">
       <div style="font-size:22px;font-weight:800;color:#f8fafc;letter-spacing:-0.5px">🎯 极致教育</div>
-      <div style="font-size:13px;color:#64748b;margin-top:2px">增长作战系统</div>
+      <div style="font-size:13px;color:#64748b;margin-top:2px">增长作战系统 v11.0</div>
     </div>""", unsafe_allow_html=True)
-    st.caption(f"📅 {datetime.now().strftime('%Y-%m-%d')}")
+    st.caption(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+    # 角色选择（学管=顾问=销售，是同一个岗位）
+    role = st.selectbox("👤 当前视角", list(ROLE_PAGES.keys()), label_visibility="visible", key="active_role")
     st.divider()
-    st.markdown('<div style="font-size:11px;color:#475569;font-weight:600;letter-spacing:1px;padding:4px 0 6px 2px">增长管理</div>', unsafe_allow_html=True)
-    page = st.radio("导航页面", [
-        "📊 老板驾驶舱",
-        "🏫 学校增长情报台",
-        "🎯 广告预测台",
-        "💼 顾问作战台",
-        "📝 推广素材台",
-        "✅ 执行监督台",
-        "📈 归因分析台",
-        "📁 数据资料中心",
-        "🔁 周复盘台",
-        "🛠 Agent管理中心",
-    ], label_visibility="collapsed")
+
+    st.markdown(
+        f'<div style="font-size:11px;color:#94a3b8;font-weight:600;padding:2px 0 4px">{ROLE_SECTION_LABELS[role]}</div>',
+        unsafe_allow_html=True,
+    )
+    page = st.radio("页面导航", ROLE_PAGES[role], label_visibility="collapsed", key=f"nav_{role}")
+
     st.divider()
-    st.caption("v10.0 · 增长管理系统")
+    try:
+        _sb_s30 = get_order_stats(days=30)
+        _sb_s7  = get_order_stats(days=7)
+        st.markdown("**📊 本月快讯**")
+        st.caption(f"订单 {_sb_s30['total']}单 · 营收 元{int(_sb_s30['total_amount']/10000)}万")
+        st.caption(f"近7天 {_sb_s7['total']}单")
+    except:
+        pass
+
+    st.markdown("**⚡ 常用入口**")
+    _q1, _q2 = st.columns(2)
+    if _q1.button("上传数据", key="quick_data", width="stretch"):
+        st.session_state["_goto"] = "📁 数据资料中心"
+        st.rerun()
+    if _q2.button("内容池", key="quick_content", width="stretch"):
+        st.session_state["_goto"] = "📝 内容池"
+        st.rerun()
+    _q3, _q4 = st.columns(2)
+    if _q3.button("上线台", key="quick_launch", width="stretch"):
+        st.session_state["_goto"] = "🚀 新产品上线台"
+        st.rerun()
+    if _q4.button("Agent", key="quick_agent", width="stretch"):
+        st.session_state["_goto"] = "🛠 Agent管理中心"
+        st.rerun()
+
+
+PAUSED_PAGE_ACTIONS = {
+    "📡 渠道作战台": [
+        ("补齐渠道来源", "到数据资料中心导入 leads.source_channel 或同步 CRM 渠道字段。", "📁 数据资料中心"),
+        ("查看销售承接", "渠道数据未完整前，先让销售作战台跟进已有线索。", "💼 销售顾问作战台"),
+        ("检查执行任务", "已有渠道任务可先在部门任务台继续推进。", "✅ 部门任务台"),
+    ],
+    "🔮 增长预测台": [
+        ("导入订单数据", "补齐 orders.order_date、amount、product、sales_owner。", "📁 数据资料中心"),
+        ("查看老板驾驶舱", "先使用真实订单聚合的经营快照。", "📊 老板驾驶舱"),
+        ("检查产品状态", "用新产品上线台确认在途产品和阻断。", "🚀 新产品上线台"),
+    ],
+    "📡 市场情报台": [
+        ("补齐市场信号", "先导入学校节点、考试周、需求反馈等 evidence。", "📁 数据资料中心"),
+        ("查看渠道作战", "渠道页会提示当前缺哪些线索来源字段。", "📡 渠道作战台"),
+        ("沉淀资料事实", "把市场资料先放入公司资料学习中心确认。", "📚 公司资料学习中心"),
+    ],
+    "🏫 学校增长情报台": [
+        ("补齐学校字段", "订单和线索需要 school、country、product 等字段。", "📁 数据资料中心"),
+        ("查看产品目录", "先确认不同学校适用的正式产品名称。", "📦 产品目录与推荐台"),
+        ("上传学校资料", "学校节点、课程考核和历史案例需要先确认来源。", "📚 公司资料学习中心"),
+    ],
+    "🚦 产品红绿灯": [
+        ("维护产品上线卡", "先补齐产品阶段、交付风险和销售边界。", "🚀 新产品上线台"),
+        ("查看产品目录", "确认产品口径、适用场景和价格边界。", "📦 产品目录与推荐台"),
+        ("导入订单证据", "红绿灯需结合订单、老师容量和客户反馈。", "📁 数据资料中心"),
+    ],
+    "🎯 广告预测台": [
+        ("补齐投放数据", "需要渠道、线索、成交和历史活动数据。", "📁 数据资料中心"),
+        ("先生成内容", "广告素材可先从内容池审核通过后复用。", "📝 内容池"),
+        ("查看销售反馈", "用产品反馈台确认客户异议和投放风险。", "🗣️ 产品反馈台"),
+    ],
+    "🧭 战略建议台": [
+        ("上传战略依据", "战略建议必须基于已确认资料、订单和风险证据。", "📚 公司资料学习中心"),
+        ("看老板驾驶舱", "先从真实经营数据判断是否需要战略动作。", "📊 老板驾驶舱"),
+        ("拆成执行任务", "已有战略方向可以先落到部门任务台。", "✅ 部门任务台"),
+    ],
+    "📈 归因分析台": [
+        ("补齐来源字段", "线索和订单需要能按客户、学校或渠道匹配。", "📁 数据资料中心"),
+        ("查看销售作战", "先处理当前可跟进线索和已成交客户。", "💼 销售顾问作战台"),
+        ("沉淀复盘口径", "归因口径确定后再进入每周复盘。", "🔁 每周复盘台"),
+    ],
+    "📈 产品推广策略台": [
+        ("补齐事实资料", "上传产品边界、销售话术、部门职责和风控表达。", "📚 公司资料学习中心"),
+        ("准备销售素材", "先审核已有内容，再进入销售作战台使用。", "📝 内容池"),
+        ("查看产品目录", "确认产品名称、适用场景和禁用承诺。", "📦 产品目录与推荐台"),
+    ],
+    "📅 营销日历": [
+        ("导入学校节点", "营销日历需要官方校历、考试周和DDL节点。", "📁 数据资料中心"),
+        ("查看市场情报", "市场情报台会展示资料缺口和校验状态。", "📡 市场情报台"),
+        ("先建推广任务", "确定节点后可直接在部门任务台跟执行。", "✅ 部门任务台"),
+    ],
+    "📝 内容池": [
+        ("生成推广素材", "先在推广策略台生成内容，再回到这里审核。", "📈 产品推广策略台"),
+        ("上传事实资料", "素材必须基于已确认公司资料和产品边界。", "📚 公司资料学习中心"),
+        ("销售先用现有素材", "已审核素材可在销售作战台直接复制使用。", "💼 销售顾问作战台"),
+    ],
+    "🔁 每周复盘台": [
+        ("补齐本周订单", "复盘必须先有本周 orders 和 leads 数据。", "📁 数据资料中心"),
+        ("处理未完成任务", "先看部门任务台的逾期、阻断和执行状态。", "✅ 部门任务台"),
+        ("看实时经营快照", "老板驾驶舱提供不含 AI 推断的实时情况。", "📊 老板驾驶舱"),
+    ],
+}
+
+
+def _show_no_data_page(page_name: str, reason: str = ""):
+    st.title(page_name)
+    st.markdown(
+        f"""
+        <div class="empty-card">
+          <div class="empty-card-title">当前页面已进入安全暂停状态</div>
+          <div class="empty-card-desc">{NO_DATA_MESSAGE} {reason or ''}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("### 现在可以做什么")
+    actions = PAUSED_PAGE_ACTIONS.get(page_name, [
+        ("补齐真实数据", "导入订单、线索、产品资料或部门事实后再生成结论。", "📁 数据资料中心"),
+        ("查看经营快照", "先使用老板驾驶舱里基于真实数据的只读指标。", "📊 老板驾驶舱"),
+        ("处理执行事项", "可先推进已有任务和产品上线卡。", "✅ 部门任务台"),
+    ])
+    cols = st.columns(len(actions))
+    for idx, (title, body, target_page) in enumerate(actions):
+        with cols[idx]:
+            st.markdown(
+                f"""
+                <div class="status-card">
+                  <div class="status-card-title">{title}</div>
+                  <div class="status-card-body">{body}</div>
+                  <div class="status-card-foot">跳转到：{target_page}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button("前往", key=f"paused_goto_{page_name}_{idx}", width="stretch"):
+                st.session_state["_goto"] = target_page
+                st.rerun()
+
+
+PAUSED_UNTRUSTED_PAGES = {
+    "📡 渠道作战台": "渠道频次、主题和推广任务未接入真实渠道数据契约，暂停输出推广建议。",
+    "🔮 增长预测台": "预测页面数据契约未重建，暂停输出增长结论。",
+    "📡 市场情报台": "市场情报来源未完成 evidence 校验，暂停输出市场判断。",
+    "🏫 学校增长情报台": "学校策略卡和内容建议未完成 evidence 校验，暂停输出学校推广结论。",
+    "🚦 产品红绿灯": "产品红绿灯需重新接入产品目录、订单、老师容量和风险证据，暂停输出推广边界。",
+    "🎯 广告预测台": "广告预测依赖评分模型和历史数据校验，暂停输出预测区间。",
+    "🧭 战略建议台": "战略建议必须含 evidence/confidence/responsible_role，旧数据未完成校验。",
+    "📈 归因分析台": "归因字段和角色来源未完成校验，暂停输出归因结论。",
+    "📈 产品推广策略台": "旧策略页含 AI/fallback 输出，暂停正式展示。",
+    "📅 营销日历": "营销日历含推广节奏建议，未完成真实节点 evidence 校验，暂停正式展示。",
+    "📝 内容池": "内容池含创作优先级和素材建议，未完成 guardrails 校验，暂停正式展示。",
+    "🔁 每周复盘台": "每周复盘含 AI 结论，未完成统一输出契约校验，暂停正式展示。",
+}
+
+if page in PAUSED_UNTRUSTED_PAGES:
+    _show_no_data_page(page, PAUSED_UNTRUSTED_PAGES[page])
+    page = "__paused_no_data__"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 通用工具：AI建议→任务（所有页面共用，必须在 if/elif 链之前定义）
+# ══════════════════════════════════════════════════════════════════════════════
+def _create_task_from_suggestion(title, desc, dept, owner="", deadline_days=7,
+                                  source_agent="", product="", channel="",
+                                  priority="高", success_criteria="", review_metric=""):
+    """统一任务创建函数 - 11个字段写入 tasks 表"""
+    from datetime import datetime as _cdt, timedelta as _ctd
+    if product:
+        _products = [p.strip() for p in str(product).replace("/", "、").split("、") if p.strip()]
+        _bad_products = [p for p in _products if not validate_product(p).get("valid")]
+        if _bad_products:
+            st.error("产品目录校验失败，无法创建任务。")
+            return None
+    deadline = (_cdt.now() + _ctd(days=deadline_days)).strftime("%Y-%m-%d")
+    full_desc = (
+        f"{desc}\n\n"
+        f"━━ 任务详情 ━━\n"
+        f"来源Agent：{source_agent or 'AI建议'}\n"
+        f"关联产品：{product or '待确认'}\n"
+        f"关联渠道：{channel or '待确认'}\n"
+        f"完成标准：{success_criteria or '按计划完成'}\n"
+        f"复盘指标：{review_metric or '完成率、结果数据'}"
+    )
+    tid = save_task({
+        "title": title,
+        "description": full_desc,
+        "department": dept,
+        "assignee": owner,
+        "due_date": deadline,
+        "priority": priority,
+        "status": "todo",
+        "source": source_agent or "AI建议",
+        "tags": f"{product},{channel}".strip(","),
+    })
+    return tid
 
 
 # ══════════════════════════════════════════════
 # 页面：市场情报台
 # ══════════════════════════════════════════════
-if page == "🏫 学校增长情报台":
+if page == "📡 渠道作战台":
+    import pandas as _pd_ch
+    import datetime as _ch_dt
+
+    st.markdown("## 📡 渠道作战台")
+    st.caption("6大渠道本周运营状态 · 推广任务和建议必须来自真实订单/线索 evidence")
+
+    try:
+        _ch_s7  = get_order_stats(days=7)
+        _ch_s30 = get_order_stats(days=30)
+        _ch_orders7 = list_orders(days=7, limit=500)
+        _ch_leads7 = list_leads(days=7, limit=500)
+        _ch_now = _ch_dt.datetime.now()
+        _ch_week_start = (_ch_now - _ch_dt.timedelta(days=_ch_now.weekday())).strftime('%Y-%m-%d')
+
+        # 产品建议（取本周热门前3）
+        _ch_prod7 = []
+        for _p, _cnt in sorted(_ch_s7['by_product'], key=lambda x: -x[1])[:10]:
+            _vp = validate_product(_p)
+            if _vp.get("valid"):
+                _ch_prod7.append((_vp["product_name"], _cnt))
+            if len(_ch_prod7) >= 3:
+                break
+        _ch_hot_prods = "、".join([p for p, _ in _ch_prod7])
+    except Exception as _e_ch:
+        st.error(f"数据加载：{_e_ch}")
+        st.stop()
+
+    if not _ch_orders7 and not _ch_leads7:
+        st.info(NO_DATA_MESSAGE)
+        st.stop()
+
+    _ch_config = {
+        "小红书": {
+            "icon": "📕",
+            "desc": "主要线索来源渠道，重点目标人群：准留学生、在读留学生",
+            "content_theme": "需根据真实线索/订单确定",
+            "push_freq": "需根据真实运营计划确定",
+            "主推产品": _ch_hot_prods or NO_DATA_MESSAGE,
+        },
+        "垂直号": {
+            "icon": "📱",
+            "desc": "专业留学辅导公众号，深度内容，建立信任",
+            "content_theme": "需根据真实线索/订单确定",
+            "push_freq": "需根据真实运营计划确定",
+            "主推产品": _ch_hot_prods or NO_DATA_MESSAGE,
+        },
+        "朋友圈": {
+            "icon": "👥",
+            "desc": "顾问/学管个人朋友圈，转化率高",
+            "content_theme": "需根据真实线索/订单确定",
+            "push_freq": "需根据真实运营计划确定",
+            "主推产品": _ch_hot_prods or NO_DATA_MESSAGE,
+        },
+        "社群": {
+            "icon": "💬",
+            "desc": "学生社群运营，维护老客户，激活转介绍",
+            "content_theme": "需根据真实线索/订单确定",
+            "push_freq": "需根据真实运营计划确定",
+            "主推产品": _ch_hot_prods or NO_DATA_MESSAGE,
+        },
+        "老客户转介绍": {
+            "icon": "🤝",
+            "desc": "老客户口碑传播，成本低、信任度高",
+            "content_theme": "需根据老客真实订单确定",
+            "push_freq": "需根据真实运营计划确定",
+            "主推产品": _ch_hot_prods or NO_DATA_MESSAGE,
+        },
+        "代理渠道": {
+            "icon": "🏢",
+            "desc": "B端代理商合作，批量获客",
+            "content_theme": "需根据代理渠道真实数据确定",
+            "push_freq": "需根据真实运营计划确定",
+            "主推产品": _ch_hot_prods or NO_DATA_MESSAGE,
+        },
+    }
+
+    for _ch_name, _ch_info in _ch_config.items():
+        with st.expander(f"{_ch_info['icon']} **{_ch_name}** — {_ch_info['desc']}", expanded=True):
+            _ccc1, _ccc2, _ccc3 = st.columns([2, 2, 1])
+
+            with _ccc1:
+                st.markdown("**本周任务**")
+                st.markdown(f"• 主题：{_ch_info['content_theme']}")
+                st.markdown(f"• 频次：{_ch_info['push_freq']}")
+                st.markdown(f"• 主推产品：{_ch_info['主推产品']}")
+                st.caption("evidence: orders/leads 近7天真实记录")
+
+            with _ccc2:
+                st.markdown("**本周数据**")
+                _ch_leads = st.number_input(f"线索数", 0, 10000, 0, key=f"ch_lead_{_ch_name}", label_visibility="visible")
+                _ch_deals = st.number_input(f"成交数", 0, 1000, 0, key=f"ch_deal_{_ch_name}", label_visibility="visible")
+                if _ch_leads > 0:
+                    st.caption(f"转化率：{_ch_deals/_ch_leads:.0%}")
+
+            with _ccc3:
+                st.markdown("**操作**")
+                if st.button(f"📋 创建任务", key=f"ch_task_{_ch_name}"):
+                    if not _ch_hot_prods:
+                        st.info(NO_DATA_MESSAGE)
+                        st.stop()
+                    _create_task_from_suggestion(
+                        title=f"{_ch_name}本周推广任务",
+                        desc=f"渠道：{_ch_name}\n主题：{_ch_info['content_theme']}\n频次：{_ch_info['push_freq']}\n主推产品：{_ch_info['主推产品']}",
+                        dept="推广/市场", deadline_days=7,
+                        source_agent="渠道作战台", channel=_ch_name,
+                        product=_ch_info['主推产品'], priority="高",
+                        success_criteria=f"完成{_ch_info['push_freq']}的内容发布",
+                        review_metric="线索数、成交数、转化率"
+                    )
+                    st.success("已创建！")
+                if st.button(f"💡 优化建议", key=f"ch_opt_{_ch_name}"):
+                    st.info(NO_DATA_MESSAGE)
+
+            st.divider()
+
+    # 渠道横向对比
+    st.markdown("### 📊 渠道横向对比（本周）")
+    _ch_summary_rows = []
+    for _ch_name in _ch_config:
+        _ch_summary_rows.append({"渠道": _ch_name, "主推产品": _ch_config[_ch_name]["主推产品"][:20], "发布频次": _ch_config[_ch_name]["push_freq"], "内容方向": _ch_config[_ch_name]["content_theme"][:20]})
+    st.dataframe(_pd_ch.DataFrame(_ch_summary_rows), width='stretch', hide_index=True)
+
+    # 生成本周渠道总任务
+    if st.button("📋 一键生成本周所有渠道任务", type="primary"):
+        if not _ch_hot_prods:
+            st.info(NO_DATA_MESSAGE)
+            st.stop()
+        for _ch_n, _ch_i in _ch_config.items():
+            _create_task_from_suggestion(
+                title=f"{_ch_n}本周推广任务",
+                desc=f"渠道：{_ch_n}\n主题：{_ch_i['content_theme']}\n主推：{_ch_i['主推产品']}",
+                dept="推广/市场", deadline_days=7, source_agent="渠道作战台",
+                channel=_ch_n, product=_ch_i['主推产品'], priority="高",
+            )
+        st.success(f"✅ 已创建6个渠道本周任务！前往「部门任务台」查看")
+
+elif page == "💼 销售顾问作战台":
+    import pandas as _pd_sales
+    import datetime as _sales_dt
+
+    st.markdown("## 💼 销售顾问作战台")
+    st.caption("学管/顾问/销售 — 统一入口。今日应该跟谁、推什么、怎么说。")
+
+    try:
+        _sl_s7  = get_order_stats(days=7)
+        _sl_s30 = get_order_stats(days=30)
+        _sl_ls30 = get_lead_stats(days=30)
+
+        # 近7天成交数据
+        _sl_orders7 = list_orders(days=7, limit=200)
+        _sl_leads30 = list_leads(days=30, limit=500) if 'list_leads' in dir() else []
+
+        # 顾问本周排行
+        _sl_owner = {}
+        for _o in _sl_orders7:
+            _own = (_o.get('sales_owner') or '未分配').split()[0]
+            _sl_owner.setdefault(_own, {'cnt':0,'amt':0})
+            _sl_owner[_own]['cnt'] += 1
+            _sl_owner[_own]['amt'] += _o.get('amount') or 0
+
+    except Exception as _e_sl:
+        st.error(f"数据加载：{_e_sl}")
+        st.stop()
+
+    # ── 今日战情 ──
+    _sl_c1, _sl_c2, _sl_c3, _sl_c4 = st.columns(4)
+    _sl_c1.metric("本周成交", f"{_sl_s7['total']}单")
+    _sl_c2.metric("本周营收", f"元{int(_sl_s7['total_amount']/10000)}万")
+    _sl_c3.metric("本月线索", f"{_sl_ls30.get('total',0)}条")
+    _sl_c4.metric("转化率", f"{_sl_ls30.get('conversion_rate',0):.0%}")
+
+    st.divider()
+
+    # ── 顾问排行 ──
+    st.markdown("### 👥 本周顾问排行（谁在做，谁需要支持）")
+    if _sl_owner:
+        _sl_rank_rows = []
+        for _rank, (_own, _d) in enumerate(sorted(_sl_owner.items(), key=lambda x: -x[1]['amt']), 1):
+            _sl_avg = int(_d['amt'] / max(_d['cnt'], 1))
+            _sl_rank_rows.append({
+                '排名': f"{'🥇' if _rank==1 else '🥈' if _rank==2 else '🥉' if _rank==3 else str(_rank)}",
+                '顾问': _own,
+                '本周单量': _d['cnt'],
+                '本周营收': f"元{int(_d['amt']):,}",
+                '客单价': f"元{_sl_avg:,}",
+                '状态': '🔥 超额' if _d['cnt'] >= 5 else ('⚠️ 需关注' if _d['cnt'] <= 1 else '✅ 正常'),
+            })
+        st.dataframe(_pd_sales.DataFrame(_sl_rank_rows), width='stretch', hide_index=True)
+
+    st.divider()
+
+    # ── 今日产品推荐 ──
+    st.markdown("### 🎯 今日产品线索（只显示真实成交产品）")
+
+    # 取本周最热产品
+    _sl_prod7 = []
+    for _raw_prod, _cnt in sorted(_sl_s7['by_product'], key=lambda x: -x[1])[:10]:
+        _vp = validate_product(_raw_prod)
+        if _vp.get("valid"):
+            _sl_prod7.append((_vp["product_name"], _cnt, _vp["canonical_product_id"]))
+        if len(_sl_prod7) >= 5:
+            break
+    if not _sl_prod7:
+        st.info(NO_DATA_MESSAGE)
+
+    for _sl_prod_name, _sl_cnt, _sl_pid in _sl_prod7:
+        with st.expander(f"**{_sl_prod_name}** — 本周 {_sl_cnt} 单", expanded=(_sl_prod7.index((_sl_prod_name, _sl_cnt, _sl_pid)) == 0)):
+            st.markdown(f"真实成交：**{_sl_cnt}** 单")
+            st.caption(f"evidence: orders.product={_sl_pid};count={_sl_cnt}")
+            st.info("销售话术需来自已审核知识库或经过 evidence 校验的 AI 建议；当前不展示未校验话术。")
+
+    st.divider()
+
+    # ── AI销售建议 ──
+    st.markdown("### 💡 今日销售行动建议")
+    try:
+        _sl_suggs = list_suggestions(suggestion_type="weekly_sales_suggestion_v2", limit=3)
+        if _sl_suggs:
+            for _i, _sg in enumerate(_sl_suggs[:3]):
+                _sg_text = (_sg.get('recommendation') or _sg.get('content') or '')[:500]
+                _sg_date = (_sg.get('created_at') or '')[:10]
+                with st.expander(f"建议{_i+1} — {_sg_date}", expanded=(_i==0)):
+                    st.markdown(_sg_text)
+                    st.markdown("---")
+                    _sg_c1, _sg_c2, _sg_c3 = st.columns(3)
+                    _sg_owner = _sg_c1.text_input("负责人", "", key=f"sl_sg_own_{_i}")
+                    _sg_prod  = _sg_c2.selectbox("关联产品", [""] + list(PRODUCT_ZH.values()), key=f"sl_sg_prod_{_i}")
+                    _sg_ch    = _sg_c3.selectbox("关联渠道", [""] + CHANNELS, key=f"sl_sg_ch_{_i}")
+                    if st.button(f"📋 转任务", key=f"sl_sg_task_{_i}", type="secondary"):
+                        _create_task_from_suggestion(
+                            title=_sg_text[:50],
+                            desc=_sg_text,
+                            dept="销售部",
+                            owner=_sg_owner,
+                            deadline_days=7,
+                            source_agent="weekly_sales_suggestion_v2",
+                            product=_sg_prod,
+                            channel=_sg_ch,
+                            priority="高",
+                            success_criteria="本周完成相关跟进",
+                            review_metric="成交数、成交额"
+                        )
+                        st.success("✅ 任务已写入部门任务台！")
+        else:
+            st.info("销售建议每周一自动生成，暂无数据")
+    except Exception as _e_sl_sg:
+        st.caption(f"建议加载：{_e_sl_sg}")
+
+    st.divider()
+
+    # ── 产品目录快查 ──
+    st.markdown("### 📦 快速查产品（按客户问题推荐）")
+    _sl_cat = st.selectbox("客户的问题是：", list(PRODUCT_CATALOG.keys()), key="sl_cat")
+    if _sl_cat:
+        for _sl_p in PRODUCT_CATALOG.get(_sl_cat, []):
+            st.markdown(f"**✅ 推荐：{_sl_p['name']}**")
+            st.markdown(f"• 适合：{_sl_p.get('fit','')}")
+            st.markdown(f"• 话术：{_sl_p.get('sales_script','')}")
+            st.markdown("---")
+
+elif page == "📦 产品目录与推荐台":
+    import pandas as _pd_pcat
+
+    st.markdown("## 📦 产品目录与推荐台")
+    st.caption("正式页面只展示 PRODUCT_CATALOG 中锁定产品；推荐必须来自真实线索/订单 evidence。")
+
+    _pcat_tab1, _pcat_tab2 = st.tabs(["锁定产品目录", "真实数据推荐"])
+
+    with _pcat_tab1:
+        _pcat_rows = []
+        for _p in _CATALOG_PRODUCTS:
+            _pcat_rows.append({
+                "产品ID": _p.get("id", ""),
+                "产品名称": _p.get("name", ""),
+                "产品说明": _p.get("desc", ""),
+                "价格口径": _p.get("price_range", ""),
+                "别名": "、".join(_p.get("aliases", [])[:5]),
+            })
+        if _pcat_rows:
+            st.dataframe(_pd_pcat.DataFrame(_pcat_rows), width="stretch", hide_index=True)
+        else:
+            st.info(NO_DATA_MESSAGE)
+
+    with _pcat_tab2:
+        _real_leads = list_leads(days=90, limit=1000)
+        _real_orders = list_orders(days=90, limit=1000)
+        if not _real_leads and not _real_orders:
+            st.info(NO_DATA_MESSAGE)
+        else:
+            _rec_rows = {}
+            for _lead in _real_leads:
+                _raw = _lead.get("product_interest")
+                _v = validate_product(_raw)
+                if not _v.get("valid"):
+                    continue
+                _pid = _v.get("product_id")
+                _rec_rows.setdefault(_pid, {"产品": _v.get("product_name"), "线索数": 0, "订单数": 0, "成交额": 0.0, "evidence": []})
+                _rec_rows[_pid]["线索数"] += 1
+                _rec_rows[_pid]["evidence"].append(f"lead_id={_lead.get('id')}")
+            for _order in _real_orders:
+                _raw = _order.get("product")
+                _v = validate_product(_raw)
+                if not _v.get("valid"):
+                    continue
+                _pid = _v.get("product_id")
+                _rec_rows.setdefault(_pid, {"产品": _v.get("product_name"), "线索数": 0, "订单数": 0, "成交额": 0.0, "evidence": []})
+                _rec_rows[_pid]["订单数"] += 1
+                _rec_rows[_pid]["成交额"] += float(_order.get("amount") or 0)
+                _rec_rows[_pid]["evidence"].append(f"order_id={_order.get('id')}")
+
+            if not _rec_rows:
+                st.info(NO_DATA_MESSAGE)
+            else:
+                _out_rows = []
+                for _pid, _r in sorted(_rec_rows.items(), key=lambda x: (x[1]["订单数"], x[1]["线索数"]), reverse=True):
+                    _confidence = "high" if _r["订单数"] >= 3 else "medium" if _r["订单数"] or _r["线索数"] >= 3 else "low"
+                    _out_rows.append({
+                        "产品": _r["产品"],
+                        "线索数": _r["线索数"],
+                        "订单数": _r["订单数"],
+                        "成交额": round(_r["成交额"], 2),
+                        "evidence": "、".join(_r["evidence"][:8]),
+                        "confidence": _confidence,
+                        "responsible_role": "销售/顾问/学管",
+                    })
+                st.dataframe(_pd_pcat.DataFrame(_out_rows), width="stretch", hide_index=True)
+    st.stop()
+
+elif page == "🏫 学校增长情报台":
     st.title("🏫 学校增长情报台")
     st.caption("基于内部真实数据的学校机会评分与策略卡 · 不含任何外部编造信息")
+
+    # ══ Section 0：学校热度总览（实时订单数据）══════════════════════════════
+    try:
+        _s_all = get_order_stats(days=0)
+        _s_30  = get_order_stats(days=30)
+        _s_90  = get_order_stats(days=90)
+        _sch_all = dict(_s_all['by_school'])
+        _sch_30  = dict(_s_30['by_school'])
+        _sch_90  = dict(_s_90['by_school'])
+        _sch_rev = dict(_s_all.get('revenue_by_school', []))
+        _valid_schools = [s for s, _ in _s_all['by_school'] if _is_valid_school(s)][:20]
+
+        st.markdown("### 📊 学校热度总览（全量数据）")
+        cols = st.columns(4)
+        for i, sch in enumerate(_valid_schools[:4]):
+            cols[i].metric(sch[:8], f"{_sch_all[sch]}单", delta=f"近30天{_sch_30.get(sch,0)}单")
+
+        st.markdown("#### Top20学校完整排行")
+        import pandas as _pd_sch_inf
+        _sch_rows = []
+        for i, sch in enumerate(_valid_schools[:20], 1):
+            cnt_all = _sch_all.get(sch, 0)
+            cnt_30  = _sch_30.get(sch, 0)
+            cnt_90  = _sch_90.get(sch, 0)
+            rev     = _sch_rev.get(sch, 0)
+            trend   = "↑热门" if cnt_30 >= cnt_90/3 else "→稳定"
+            _sch_rows.append({'排名': i, '学校': sch, '总单量': cnt_all, '近30天': cnt_30, '近90天': cnt_90, '总营收': f"元{int(rev):,}", '趋势': trend})
+        if _sch_rows:
+            st.dataframe(_pd_sch_inf.DataFrame(_sch_rows), width='stretch', hide_index=True)
+
+        # Section 3：各学校主力产品
+        st.markdown("#### 📦 各学校主力产品分析")
+        try:
+            _sch_orders = list_orders(days=365, limit=5000)
+            _sch_prod_cnt: dict = {}
+            for _so in _sch_orders:
+                _ss = _so.get('school') or ''
+                _sp = _so.get('product') or '未知'
+                if not _is_valid_school(_ss): continue
+                _sch_prod_cnt.setdefault(_ss, {})
+                _sch_prod_cnt[_ss][_sp] = _sch_prod_cnt[_ss].get(_sp, 0) + 1
+            for sch in _valid_schools[:10]:
+                _prods = _sch_prod_cnt.get(sch, {})
+                if not _prods: continue
+                _top_prods = sorted(_prods.items(), key=lambda x: -x[1])[:5]
+                with st.expander(f"**{sch}** — 近1年主力产品"):
+                    for _pn, _pc in _top_prods:
+                        st.markdown(f"- {_pn}：**{_pc}** 单")
+        except Exception as _e_sp:
+            st.info(f"产品分析加载中：{_e_sp}")
+
+        # ── Section：课程作业/考试DDL情报 ──────────────────────────────
+        st.markdown("---")
+        st.markdown("### 📝 热门专业作业/考试 DDL 情报")
+        st.caption("覆盖澳洲+英国热门专业（商科/CS/法律/心理），数据来源：课程大纲+模式推断")
+
+        try:
+            from database.crud import list_course_assessments
+            _ca_filter_cols = st.columns(4)
+            _ca_school  = _ca_filter_cols[0].selectbox("学校", ["全部"] + [
+                "新南威尔士大学", "悉尼大学", "墨尔本大学", "莫纳什大学Monash", "昆士兰大学",
+                "伦敦大学学院UCL", "曼彻斯特大学", "利兹大学", "谢菲尔德大学", "伦敦国王学院KCL",
+                "伯明翰大学",
+            ], key="ca_school")
+            _ca_major   = _ca_filter_cols[1].selectbox("专业类别", ["全部", "商科", "CS/IT", "法律", "心理", "工程"], key="ca_major")
+            _ca_atype   = _ca_filter_cols[2].selectbox("考核类型", ["全部", "assignment", "exam", "quiz", "project"], key="ca_atype")
+            _ca_days    = _ca_filter_cols[3].selectbox("时间范围", ["全部", "60天内", "90天内", "180天内"], key="ca_days")
+
+            _ca_days_val = None
+            if _ca_days == "60天内": _ca_days_val = 60
+            elif _ca_days == "90天内": _ca_days_val = 90
+            elif _ca_days == "180天内": _ca_days_val = 180
+
+            _ca_data = list_course_assessments(
+                school=None if _ca_school == "全部" else _ca_school,
+                major_category=None if _ca_major == "全部" else _ca_major,
+                assessment_type=None if _ca_atype == "全部" else _ca_atype,
+                days_ahead=_ca_days_val,
+                limit=300,
+            )
+
+            if _ca_data:
+                import pandas as _pd_ca
+                _ca_rows = []
+                _today_str = date.today().isoformat()
+                for _ca in _ca_data:
+                    _due = _ca.get("due_date") or ""
+                    _days_left = ""
+                    if _due:
+                        try:
+                            _d = (datetime.strptime(_due, "%Y-%m-%d").date() - date.today()).days
+                            _days_left = f"{_d}天后" if _d >= 0 else f"已过{-_d}天"
+                        except Exception:
+                            pass
+                    _type_label = {"exam": "🎯期末考", "assignment": "📄作业", "quiz": "📝测验", "project": "🔧项目", "presentation": "🎤展示"}.get(_ca.get("assessment_type",""), _ca.get("assessment_type",""))
+                    _ca_rows.append({
+                        "学校": _ca.get("school",""),
+                        "课程代码": _ca.get("subject_code",""),
+                        "课程名": (_ca.get("subject_name","") or "")[:25],
+                        "专业": _ca.get("major_category",""),
+                        "学期": _ca.get("semester",""),
+                        "考核": _type_label,
+                        "任务名": (_ca.get("assessment_name","") or "")[:30],
+                        "截止日期": _due,
+                        "距今": _days_left,
+                        "周次": _ca.get("due_week",""),
+                        "权重": f"{int(_ca.get('weight_pct') or 0)}%" if _ca.get("weight_pct") else "",
+                        "来源": _ca.get("source",""),
+                    })
+                _ca_df = _pd_ca.DataFrame(_ca_rows)
+                st.dataframe(_ca_df, width='stretch', hide_index=True,
+                             column_config={
+                                 "截止日期": st.column_config.DateColumn("截止日期", format="YYYY-MM-DD"),
+                                 "权重": st.column_config.TextColumn("权重"),
+                             })
+                st.caption(f"共 {len(_ca_rows)} 条记录 · 覆盖 {len(set(r['学校'] for r in _ca_rows))} 所学校 {len(set(r['课程代码'] for r in _ca_rows))} 门课程")
+
+                # 快速洞察：未来30天高压节点
+                _upcoming_exams = [r for r in _ca_rows if "期末考" in r["考核"] and "天后" in r["距今"]
+                                    and int(r["距今"].replace("天后","")) <= 30]
+                _upcoming_ass   = [r for r in _ca_rows if "作业" in r["考核"] and "天后" in r["距今"]
+                                    and int(r["距今"].replace("天后","")) <= 30]
+                if _upcoming_exams or _upcoming_ass:
+                    st.warning(f"⚠️ 未来30天高压节点：**{len(_upcoming_exams)} 场期末考** · **{len(_upcoming_ass)} 个作业截止** — 这是最佳触达时机！")
+            else:
+                st.info("暂无课程考核数据。运行 `python agents/course_assessment_scraper.py --seed` 填充基础数据。")
+
+        except Exception as _e_ca:
+            st.info(f"课程考核数据加载中：{_e_ca}")
+
+        st.divider()
+    except Exception as _e_sch_inf:
+        st.warning(f"学校情报数据加载中：{_e_sch_inf}")
 
     _scores = list_school_scores(limit=100)
     if not _scores:
@@ -476,7 +1457,7 @@ if page == "🏫 学校增长情报台":
         "主推产品": "、".join(s["hot_products"][:2]) or "—",
         "风险提示": s["risk_notes"][0][:30] if s["risk_notes"] else "—",
         "资料缺口": f"{len(s['missing_data'])}项" if s["missing_data"] else "✓ 完整",
-    } for i, s in enumerate(_filtered)]), use_container_width=True, hide_index=True)
+    } for i, s in enumerate(_filtered)]), width='stretch', hide_index=True)
 
     # ── 策略卡 ──
     st.subheader("🃏 学校策略卡")
@@ -550,11 +1531,11 @@ if page == "🏫 学校增长情报台":
         }
         _gcols = st.columns(6)
         for _i, (_label, _ctype) in enumerate(_GEN_TYPES.items()):
-            if _gcols[_i].button(_label, key=f"gen_school_{_ctype}", use_container_width=True):
+            if _gcols[_i].button(_label, key=f"gen_school_{_ctype}", width='stretch'):
                 with st.spinner(f"基于 {_sel} 策略卡生成{_label}..."):
                     try:
-                        import anthropic as _anthropic
-                        _client = _anthropic.Anthropic()
+                        from services.llm import LLMRouter as _LLMRouter2
+                        _llm2 = _LLMRouter2()
                         _gp = (f"你是教育机构推广文案专家。基于以下学校策略卡，生成3条具体的{_label}。\n"
                                f"学校：{_sel}（{_card['country']}）阶段：{_card['current_stage']}\n"
                                f"P0主推：{_card['main_product']}；次推：{_card['secondary_products']}\n"
@@ -563,10 +1544,8 @@ if page == "🏫 学校增长情报台":
                                f"风险约束：{json.dumps(_card['risk_notes'], ensure_ascii=False)}\n"
                                f"要求：紧扣该校当前阶段和主推产品，不泛泛而谈；禁止'100%押中/保过'类承诺；"
                                f"每条之间用'---'分隔。")
-                        _resp = _client.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=1500,
-                            messages=[{"role": "user", "content": _gp}])
-                        _body = _resp.content[0].text.strip()
+                        _resp2 = _llm2.chat(_gp, max_tokens=1500, task_type="content_generation")
+                        _body = (_resp2.text or "生成失败，请重试").strip()
                         save_content({
                             "title": f"{_sel}·{_label}（策略卡生成）",
                             "content_type": _ctype, "school": _sel,
@@ -600,6 +1579,28 @@ elif page == "🛠 Agent管理中心":
         _f_llm    = _fc[3].selectbox("是否调用LLM", ["全部", "是", "否"])
         _f_fail   = _fc[4].selectbox("最近失败", ["全部", "仅失败"])
 
+        # 运行统计（调用次数、平均耗时、质量评分）
+        _all_runs = list_agent_runs(days=30, limit=500)
+        _run_stats = {}
+        for _r in _all_runs:
+            _an = _r.get("agent_name","")
+            if _an not in _run_stats:
+                _run_stats[_an] = {"count":0,"total_dur":0,"success":0,"failed":0}
+            _run_stats[_an]["count"] += 1
+            _run_stats[_an]["total_dur"] += float(_r.get("duration_seconds") or 0)
+            if _r.get("status") == "success": _run_stats[_an]["success"] += 1
+            if _r.get("status") == "failed":  _run_stats[_an]["failed"] += 1
+
+        _all_fbs2 = list_agent_feedbacks(limit=200)
+        _fb_scores = {}
+        for _fb in _all_fbs2:
+            _an = _fb.get("agent_name","")
+            if _an not in _fb_scores:
+                _fb_scores[_an] = {"usefulness":[],"accuracy":[],"actionability":[]}
+            if _fb.get("usefulness_score"): _fb_scores[_an]["usefulness"].append(_fb["usefulness_score"])
+            if _fb.get("accuracy_score"):   _fb_scores[_an]["accuracy"].append(_fb["accuracy_score"])
+            if _fb.get("actionability_score"): _fb_scores[_an]["actionability"].append(_fb["actionability_score"])
+
         _rows = []
         for _name, _info in _reg.items():
             _lr = _last.get(_name, {})
@@ -608,18 +1609,53 @@ elif page == "🛠 Agent管理中心":
             if _f_en != "全部" and _info["enabled"] != (_f_en == "启用"): continue
             if _f_llm != "全部" and _info["uses_llm"] != (_f_llm == "是"): continue
             if _f_fail == "仅失败" and _lr.get("status") != "failed": continue
+            _rs = _run_stats.get(_name, {})
+            _fbs2 = _fb_scores.get(_name, {})
+            _avg_dur = _rs["total_dur"] / max(_rs["count"],1) if _rs.get("count") else 0
+            _avg_score = (
+                sum(_fbs2.get("usefulness",[0]) + _fbs2.get("accuracy",[]) + _fbs2.get("actionability",[])) /
+                max(len(_fbs2.get("usefulness",[])) + len(_fbs2.get("accuracy",[])) + len(_fbs2.get("actionability",[])), 1)
+            ) if _fbs2 else 0
             _rows.append({
                 "Agent": _name, "中文名": _info["display_name"], "层级": _info["layer"],
-                "职责": _info["description"][:40],
-                "状态": {"active":"🟢","paused":"⏸️","deprecated":"🚫","experimental":"🧪"}.get(_info["status"],"") + _info["status"],
+                "职责": _info["description"][:35],
+                "状态": {"active":"🟢 active","paused":"⏸️ paused","deprecated":"🚫 deprecated","experimental":"🧪 exp"}.get(_info["status"],_info["status"]),
                 "启用": "✅" if _info["enabled"] else "❌",
                 "LLM": "✅" if _info["uses_llm"] else "—",
-                "需事实校验": "🔒" if _name in GROUNDING_REQUIRED else "—",
-                "最近运行": _lr.get("at", "从未"),
-                "最近结果": _lr.get("status", "—"),
-                "最近错误": (_lr.get("error_message") or "")[:30] or "—",
+                "30天调用": _rs.get("count", 0),
+                "成功率": f"{int(_rs['success']/_rs['count']*100)}%" if _rs.get("count") else "—",
+                "均耗时(s)": f"{_avg_dur:.1f}" if _avg_dur else "—",
+                "质量评分": f"{_avg_score:.1f}/5" if _avg_score else "—",
+                "最近运行": str(_lr.get("at", "从未"))[:16],
+                "最近结果": {"success":"✅","failed":"❌","skipped":"⏭️"}.get(_lr.get("status",""),"—") + (_lr.get("status","") or ""),
             })
-        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(_rows), width='stretch', hide_index=True)
+
+        if not _all_runs:
+            st.info("Agent运行记录将在自动化任务执行后显示。计划时间：每日08:30（每日任务）、周一09:00（周度任务）、月初09:00（月度任务）。")
+            st.markdown("### ⏰ 自动化任务时间表")
+            import pandas as _pd_ag
+            _schedule_rows = [
+                {'任务': '每日有效提醒', '运行时间': '每天 08:30', '功能': '生成今日销售提醒和风险预警'},
+                {'任务': '产品供给风险', '运行时间': '每天 08:30', '功能': '分析产品库存和交付风险'},
+                {'任务': '风险巡检', '运行时间': '每天 08:30', '功能': '扫描异常订单和逾期风险'},
+                {'任务': '周度增长简报', '运行时间': '每周一 09:00', '功能': '汇总上周数据生成增长报告'},
+                {'任务': '市场推广建议', '运行时间': '每周一 09:00', '功能': '基于数据生成下周推广策略'},
+                {'任务': '销售行动建议', '运行时间': '每周一 09:00', '功能': '针对每位顾问生成行动清单'},
+                {'任务': '归因分析', '运行时间': '每周一 09:00', '功能': '分析渠道、产品、学校转化归因'},
+                {'任务': '增长预测', '运行时间': '每周一 09:00', '功能': '预测下周各学校×产品咨询量'},
+                {'任务': '月度推广策略', '运行时间': '每月1日 09:00', '功能': '生成当月完整推广方案'},
+                {'任务': '企业微信日报', '运行时间': '每天 14:00', '功能': '推送当日数据摘要至微信群'},
+            ]
+            st.dataframe(_pd_ag.DataFrame(_schedule_rows), width='stretch', hide_index=True)
+
+        # 快速统计
+        _act_count = sum(1 for r in _rows if "✅" in r["启用"])
+        _tot_calls  = sum(r["30天调用"] for r in _rows)
+        _mc1,_mc2,_mc3 = st.columns(3)
+        _mc1.metric("启用Agent数", _act_count)
+        _mc2.metric("30天总调用", _tot_calls)
+        _mc3.metric("有质量评分", sum(1 for r in _rows if r["质量评分"] != "—"))
 
     with _tab2:
         for _layer in LAYERS:
@@ -654,7 +1690,7 @@ elif page == "🛠 Agent管理中心":
                 "输入": (l["input_summary"] or "")[:40],
                 "输出": (l["output_summary"] or "")[:40],
                 "错误": (l["error_message"] or "")[:60],
-            } for l in _logs]), use_container_width=True, hide_index=True)
+            } for l in _logs]), width='stretch', hide_index=True)
 
     with _tab4:
         st.markdown("##### 对某次 Agent 运行打分（用于后续优化 prompt）")
@@ -690,7 +1726,7 @@ elif page == "🛠 Agent管理中心":
                 "可执行": f["actionability_score"],
                 "幻觉": "⚠️是" if f["hallucination_flag"] else "否",
                 "备注": (f["feedback_text"] or "")[:50],
-            } for f in _fbs]), use_container_width=True, hide_index=True)
+            } for f in _fbs]), width='stretch', hide_index=True)
 
     with _tab5:
         _SUGGEST = {
@@ -707,31 +1743,23 @@ elif page == "🛠 Agent管理中心":
 elif page == "📡 市场情报台":
     st.title("📡 市场情报台")
     st.caption("基于实时订单、咨询数据和学校节点，动态追踪市场机会。")
-    st.info("📌 当前订单/咨询数据为演示样本（14条），接入真实数据后指标将自动更新。", icon="ℹ️")
-
     # ── 一键刷新信号 ─────────────────────────────
     col_btn, col_tip = st.columns([1, 4])
     with col_btn:
-        if st.button("🔄 刷新市场信号", type="primary", use_container_width=True):
-            import subprocess, os
-            env = os.environ.copy()
-            with st.spinner("正在分析市场数据..."):
+        if st.button("🔄 刷新市场信号", type="primary", width='stretch'):
+            with st.spinner("正在分析市场数据（约20秒）..."):
                 try:
-                    r = subprocess.run(
-                        ["uv","run","--with","sqlalchemy","--with","anthropic",
-                         "--with","pyyaml","--with","requests","--with","schedule",
-                         "python","main.py","update-market-signals"],
-                        capture_output=True, text=True, timeout=90,
-                        cwd=str(ROOT), env=env,
-                    )
-                    if r.returncode == 0:
-                        st.success("✅ 市场信号已更新")
-                    else:
-                        st.error(f"更新失败：{r.stderr[:200]}")
+                    import yaml as _yaml_mkt
+                    with open(ROOT / "config.yaml") as _f_mkt:
+                        _cfg_mkt = _yaml_mkt.safe_load(_f_mkt)
+                    from agents.school_opportunity_scoring_agent import SchoolOpportunityScoringAgent
+                    _r_mkt = SchoolOpportunityScoringAgent(_cfg_mkt).run()
+                    st.success(f"✅ 市场信号已更新，评分学校数：{len(_r_mkt) if isinstance(_r_mkt, list) else '—'}")
+                    st.rerun()
                 except Exception as e:
-                    st.error(f"执行失败：{e}")
+                    st.error(f"更新失败：{e}")
     with col_tip:
-        st.info("每日运行工作流时会自动更新信号，也可手动点击刷新。")
+        st.info("系统每天08:30自动更新市场信号，也可手动点击刷新。")
 
     st.divider()
 
@@ -741,12 +1769,14 @@ elif page == "📡 市场情报台":
     ls7  = get_lead_stats(days=7)
     ls30 = get_lead_stats(days=30)
 
+    _os_all = get_order_stats(days=0)
+    _ls_all = get_lead_stats(days=0)
     kc = st.columns(6)
-    _kpi(kc[0], os7["total"],    "近7天订单",     "#3b82f6")
-    _kpi(kc[1], os30["total"],   "近30天订单",    "#6366f1")
-    _kpi(kc[2], ls7["total"],    "近7天咨询",     "#10b981")
-    _kpi(kc[3], ls30["total"],   "近30天咨询",    "#059669")
-    _kpi(kc[4], f"¥{os7['total_amount']:,.0f}", "近7天成交额", "#f59e0b")
+    _kpi(kc[0], f"{_os_all['total']:,}", "历史总订单",  "#3b82f6")
+    _kpi(kc[1], os30["total"],           "近30天订单",  "#6366f1")
+    _kpi(kc[2], f"元{_os_all['total_amount']:,.0f}", "历史总营收", "#10b981")
+    _kpi(kc[3], f"元{os30['total_amount']:,.0f}",   "近30天营收", "#059669")
+    _kpi(kc[4], ls30["total"],  "近30天咨询",  "#f59e0b")
     _kpi(kc[5], f"{ls7['conversion_rate']:.1%}", "近7天转化率", "#ef4444")
 
     st.divider()
@@ -754,88 +1784,118 @@ elif page == "📡 市场情报台":
     left, right = st.columns(2)
 
     with left:
-        # ── 热门学校 ───────────────────────────
-        st.subheader("🔥 近7天热门学校")
-        school_orders = os7.get("by_school", [])
-        school_leads  = ls7.get("by_school", [])
-        school_merged: dict = {}
-        for s, n in school_orders: school_merged[s] = school_merged.get(s, 0) + n * 2
-        for s, n in school_leads:  school_merged[s] = school_merged.get(s, 0) + n
-        top_schools = sorted(school_merged, key=lambda k: -school_merged[k])[:6]
-        if top_schools:
-            cols = st.columns(3)
-            for i, sch in enumerate(top_schools):
-                score = school_merged[sch]
-                cols[i % 3].metric(sch, f"热度 {score}")
-        else:
-            st.info("暂无订单/咨询数据。请先导入：`python main.py ingest-orders data/orders.csv`")
+        # ── 全量TOP10热门学校 ──────────────────
+        st.subheader("🔥 全量 Top10 学校")
+        try:
+            _mkt_all_stats  = get_order_stats(days=0)
+            _mkt_sch30_dict = dict(get_order_stats(days=30).get('by_school', []))
+            _mkt_sch90_dict = dict(get_order_stats(days=90).get('by_school', []))
+            _mkt_all_sch_dict = dict(_mkt_all_stats.get('by_school', []))
+            _mkt_top_schools = [s for s, _ in _mkt_all_stats.get('by_school', []) if _is_valid_school(s)][:10]
+            if _mkt_top_schools:
+                _mkt_sch_rows = []
+                for _ms in _mkt_top_schools:
+                    _ms_all = _mkt_all_sch_dict.get(_ms, 0)
+                    _ms_30  = _mkt_sch30_dict.get(_ms, 0)
+                    _ms_90  = _mkt_sch90_dict.get(_ms, 0)
+                    _ms_hist_avg = (_ms_90 / 3) if _ms_90 else 0
+                    _ms_trend = "📈" if _ms_30 > _ms_hist_avg * 1.1 else "📉" if _ms_30 < _ms_hist_avg * 0.9 else "➡️"
+                    _mkt_sch_rows.append({
+                        '学校': _ms,
+                        '全量单量': _ms_all,
+                        '近30天': _ms_30,
+                        '趋势': _ms_trend,
+                    })
+                import pandas as _pd_mkt
+                st.dataframe(_pd_mkt.DataFrame(_mkt_sch_rows), width='stretch', hide_index=True)
+            else:
+                st.info("暂无订单/咨询数据。请先导入：`python main.py ingest-orders data/orders.csv`")
+        except Exception as _e_mkt_sch:
+            st.info(f"学校数据加载中：{_e_mkt_sch}")
 
-        # ── 近7天热门产品 ──────────────────────
-        st.subheader("💼 近7天热门产品")
-        prod_orders = dict(os7.get("by_product", []))
-        prod_leads  = dict(ls7.get("by_product", []))
-        PRODUCT_NAMES = {
-            "regular":          "常规辅导",
-            "annual_package":   "学年包",
-            "guaranteed":       "包过辅导",
-            "dissertation":     "DP论文辅导",
-            "b2b":              "对公合作",
-            "final_prediction": "Final精准押题",
-            "dp_premium":       "DP高端服务",
-            "ai_learning":      "AI合规学习",
-            "ai_compliance":    "AI合规学习",
-        }
-        all_prods = set(list(prod_orders.keys()) + list(prod_leads.keys()))
-        if all_prods:
-            prod_data = [
-                {"产品": PRODUCT_NAMES.get(p, p),
-                 "订单量": prod_orders.get(p, 0),
-                 "咨询量": prod_leads.get(p, 0)}
-                for p in all_prods if p
-            ]
-            prod_data.sort(key=lambda x: -(x["订单量"] + x["咨询量"]))
-            st.dataframe(pd.DataFrame(prod_data[:6]), use_container_width=True, hide_index=True)
-        else:
-            st.info("暂无产品数据")
+        # ── 产品完整分析 ───────────────────────
+        st.subheader("💼 产品全量分析")
+        try:
+            _mkt_os_all  = get_order_stats(days=0)
+            _mkt_os30    = get_order_stats(days=30)
+            _mkt_os60    = get_order_stats(days=60)
+            _mkt_prod_all_cnt = dict(_mkt_os_all.get('by_product', []))
+            _mkt_prod_all_rev = dict(_mkt_os_all.get('revenue_by_product', []))
+            _mkt_prod30_cnt   = dict(_mkt_os30.get('by_product', []))
+            _mkt_prod60_cnt   = dict(_mkt_os60.get('by_product', []))
+            _mkt_total_rev = sum(_mkt_prod_all_rev.values()) or 1
+            _mkt_prod_names = sorted(_mkt_prod_all_cnt.keys(), key=lambda p: -_mkt_prod_all_rev.get(p, 0))
+            if _mkt_prod_names:
+                _mkt_prod_rows = []
+                for _mp in _mkt_prod_names:
+                    _mp_cnt  = _mkt_prod_all_cnt.get(_mp, 0)
+                    _mp_rev  = _mkt_prod_all_rev.get(_mp, 0)
+                    _mp_30   = _mkt_prod30_cnt.get(_mp, 0)
+                    _mp_avg  = int(_mp_rev / max(_mp_cnt, 1))
+                    _mp_pct  = round(_mp_rev / _mkt_total_rev * 100, 1)
+                    _mp_60h  = _mkt_prod60_cnt.get(_mp, 0) / 2
+                    _mp_trend = "📈" if _mp_30 > _mp_60h * 1.1 else "📉" if _mp_30 < _mp_60h * 0.9 else "➡️"
+                    _mkt_prod_rows.append({
+                        '产品': _mp,
+                        '总单量': _mp_cnt,
+                        '总营收': f"元{int(_mp_rev):,}",
+                        '近30天': _mp_30,
+                        '均价': f"元{_mp_avg:,}",
+                        '占营收%': f"{_mp_pct}%",
+                        '趋势': _mp_trend,
+                    })
+                import pandas as _pd_mkt2
+                st.dataframe(_pd_mkt2.DataFrame(_mkt_prod_rows), width='stretch', hide_index=True)
+            else:
+                st.info("暂无产品数据")
+        except Exception as _e_mkt_prod:
+            st.info(f"产品数据加载中：{_e_mkt_prod}")
 
-        # ── 往年同期规律 ───────────────────────
-        st.subheader("📅 往年同期规律")
-        patterns = get_current_patterns(days_window=21)
-        if patterns:
-            for p in patterns[:5]:
-                with st.expander(
-                    f"📌 {p.get('school','')} · {p.get('product','')} · "
-                    f"{p.get('period_start','')}~{p.get('period_end','')}",
-                    expanded=False,
-                ):
-                    st.write(p.get("pattern_summary", ""))
-                    mc = st.columns(3)
-                    mc[0].metric("往年量", p.get("historical_volume", 0))
-                    mc[1].metric("转化率", f"{(p.get('conversion_rate') or 0):.1%}")
-                    mc[2].metric("建议提前", f"{p.get('recommended_lead_time_days',14)}天")
-                    if p.get("suggested_campaign"):
-                        st.caption(f"💡 建议活动：{p['suggested_campaign']}")
-        else:
-            st.info("暂无往年规律数据。运行 `python main.py analyze-history` 生成。")
+        # ── 产品营收构成 ───────────────────────
+        st.subheader("🥧 产品营收占比")
+        try:
+            _pie_data = {p: v for p, v in _mkt_prod_all_rev.items() if v > 0}
+            if _pie_data:
+                _pie_total = sum(_pie_data.values())
+                _pie_sorted = sorted(_pie_data.items(), key=lambda x: -x[1])[:6]
+                _pie_cols = st.columns(min(3, len(_pie_sorted)))
+                for _pii, (_pname, _prev) in enumerate(_pie_sorted):
+                    _pct = round(_prev / _pie_total * 100, 1)
+                    _pie_cols[_pii % 3].metric(_pname[:8], f"{_pct}%", f"元{int(_prev/10000):.0f}万")
+            else:
+                st.info("暂无营收数据")
+        except Exception:
+            pass
 
     with right:
-        # ── 未来2-4周节点 ─────────────────────
-        st.subheader("⏰ 未来4周学校节点")
-        upcoming = list_school_calendar(days_ahead=28)
-        if upcoming:
-            CONF_COLOR = {"high":"🟢","medium":"🟡","low":"⚪"}
-            for node in upcoming[:10]:
-                conf_icon = CONF_COLOR.get(node.get("confidence",""), "⚪")
-                start = (node.get("start_date") or "")[:10]
-                end   = (node.get("end_date") or "")[:10]
-                st.markdown(
-                    f"{conf_icon} **{node['school']}** · {node['event_type']} · "
-                    f"_{start}_{' → ' + end if end != start else ''}"
-                )
-                if node.get("event_name"):
-                    st.caption(f"   {node['event_name']}")
-        else:
-            st.info("暂无学校节点数据。运行 `python main.py ingest-calendar data/school_calendar.csv`")
+        # ── 近30天学校-产品热力分析 ─────────────
+        st.subheader("🔥 近30天学校-产品热力分析")
+        try:
+            _mkt_orders30 = list_orders(days=30, limit=2000)
+            _sch_prod_heat: dict = {}
+            for _ho in _mkt_orders30:
+                _hsch = _ho.get('school') or '未知'
+                _hprd = _ho.get('product') or '未知'
+                _sch_prod_heat.setdefault(_hsch, {})
+                _sch_prod_heat[_hsch][_hprd] = _sch_prod_heat[_hsch].get(_hprd, 0) + 1
+            if _sch_prod_heat:
+                # 取top5学校
+                _top5sch = sorted(_sch_prod_heat.keys(), key=lambda s: -sum(_sch_prod_heat[s].values()))[:5]
+                for _hsch in _top5sch:
+                    _hsch_total = sum(_sch_prod_heat[_hsch].values())
+                    _top_prod = max(_sch_prod_heat[_hsch], key=lambda p: _sch_prod_heat[_hsch][p])
+                    _top_cnt  = _sch_prod_heat[_hsch][_top_prod]
+                    st.markdown(
+                        f"**{_hsch}** — {_hsch_total}单 | "
+                        f"主力产品：{_top_prod}（{_top_cnt}单）"
+                    )
+                    _heat_items = sorted(_sch_prod_heat[_hsch].items(), key=lambda x: -x[1])[:4]
+                    st.caption("  " + "  |  ".join([f"{p}:{n}单" for p, n in _heat_items]))
+                st.divider()
+            else:
+                st.info("近30天暂无数据")
+        except Exception as _e_heat:
+            st.info(f"热力数据加载中：{_e_heat}")
 
         # ── 最新市场信号 ──────────────────────
         st.subheader("📊 最新市场信号")
@@ -854,6 +1914,20 @@ elif page == "📡 市场情报台":
                         st.success(f"💡 建议：{sig['suggested_action']}")
         else:
             st.info("暂无市场信号。点击「刷新市场信号」按钮生成。")
+            try:
+                _opp_data = list_opportunity_scores()  # 27条
+                if _opp_data:
+                    st.markdown("### 🎯 学校机会评分（AI自动计算）")
+                    import pandas as _pd_opp
+                    _opp_rows = [{'学校/产品': o['entity_name'], '评分': o['score'], '类型': o['score_type'],
+                                   '更新时间': (o.get('updated_at') or '')[:10],
+                                   '投放建议': '🔴重点' if (o.get('score') or 0) >= 80 else ('🟡培育' if (o.get('score') or 0) >= 60 else '🟢观察')}
+                                for o in sorted(_opp_data, key=lambda x: -(x.get('score') or 0))
+                                if o.get('entity_name') and _is_valid_school(o.get('entity_name', ''))][:15]
+                    if _opp_rows:
+                        st.dataframe(_pd_opp.DataFrame(_opp_rows), width='stretch', hide_index=True)
+            except Exception as _e_opp:
+                st.caption(f"机会评分加载中：{_e_opp}")
 
     st.divider()
 
@@ -862,7 +1936,7 @@ elif page == "📡 市场情报台":
     channel_data = ls30.get("by_channel", [])
     if channel_data:
         df_channel = pd.DataFrame(channel_data, columns=["渠道","咨询量"])
-        st.dataframe(df_channel, use_container_width=True, hide_index=True)
+        st.dataframe(df_channel, width='stretch', hide_index=True)
     else:
         st.info("暂无渠道数据")
 
@@ -875,6 +1949,16 @@ elif page == "📡 市场情报台":
             st.info(f"**{i}.** {action}")
     else:
         st.info("运行每日工作流或刷新市场信号以获取 AI 推荐动作")
+        try:
+            _daily_suggs = list_suggestions(suggestion_type="daily_reminder", limit=5)
+            if _daily_suggs:
+                st.markdown("**💡 最新每日提醒（来自AI）**")
+                for _i_ds, _ds in enumerate(_daily_suggs[:5], 1):
+                    _ds_txt = ((_ds.get('recommendation') or _ds.get('content') or ''))[:300]
+                    if _ds_txt:
+                        st.info(f"**{_i_ds}.** {_ds_txt}")
+        except Exception as _e_ds:
+            st.caption(f"建议加载中：{_e_ds}")
 
 
 # ══════════════════════════════════════════════
@@ -943,17 +2027,47 @@ elif page == "📈 产品推广策略台":
         st.subheader("📅 本月战略总览")
 
         # 顶部生成按钮区
-        _sc1, _sc2, _sc3 = st.columns([2, 1, 1])
+        _sc1, _sc2, _sc3, _sc4 = st.columns([2, 1, 1, 1])
         with _sc1:
             import datetime as _dt
             _default_month = _dt.date.today().strftime("%Y-%m")
             _target_month_input = st.text_input("目标月份", value=_default_month, placeholder="2026-07", key="strategy_month")
         with _sc2:
             st.write(""); st.write("")
-            _gen_monthly = st.button("🚀 生成本月推广策略", type="primary", use_container_width=True, key="gen_monthly_btn")
+            _gen_all = st.button("⚡ 一键全量生成", type="primary", width='stretch', key="gen_all_btn",
+                                  help="先运行产品供给分析，再生成AI月度推广策略")
         with _sc3:
             st.write(""); st.write("")
-            _gen_supply = st.button("🔄 更新产品供给分析", use_container_width=True, key="gen_supply_btn")
+            _gen_monthly = st.button("🤖 生成月度策略", width='stretch', key="gen_monthly_btn")
+        with _sc4:
+            st.write(""); st.write("")
+            _gen_supply = st.button("🔄 更新供给分析", width='stretch', key="gen_supply_btn")
+
+        if _gen_all:
+            _month_v = _target_month_input.strip() or _default_month
+            import yaml as _yaml
+            with open(ROOT / "config.yaml") as _f:
+                _cfg = _yaml.safe_load(_f)
+            _prog = st.progress(0, text="第1步：运行产品供给分析...")
+            try:
+                from agents.product_supply_risk_agent import ProductSupplyRiskAgent
+                _sra = ProductSupplyRiskAgent(_cfg)
+                _sr = _sra.analyze(period_days=30)
+                _prog.progress(50, text=f"✅ 供给分析完成（{_sr.get('order_count',0)}单）。第2步：生成AI月度策略...")
+            except Exception as _se:
+                st.warning(f"供给分析步骤出错（跳过）：{_se}")
+                _prog.progress(50, text="供给分析跳过，继续生成月度策略...")
+            try:
+                from agents.promotion_strategy_agent import PromotionStrategyAgent
+                _agent = PromotionStrategyAgent(_cfg)
+                _result = _agent.generate(target_month=_month_v)
+                _prog.progress(100, text="✅ 全量生成完成！")
+                st.success(f"✅ {_month_v} 月度推广策略已生成！建议ID: {_result.get('suggestion_id')}")
+                if not _result.get("data_sufficient"):
+                    st.warning("⚠️ 订单数据较少，AI建议仅供参考。")
+                st.rerun()
+            except Exception as _e:
+                st.error(f"月度策略生成失败：{_e}")
 
         if _gen_monthly:
             _month_v = _target_month_input.strip() or _default_month
@@ -989,18 +2103,111 @@ elif page == "📈 产品推广策略台":
         st.divider()
 
         # 顶部 Hero 卡：本月状态总览
+        _orders_all = list_orders(days=90, limit=1000)
+        _orders_30d_amt = sum(o.get("amount") or 0 for o in _orders_30d)
+        _orders_60d = list_orders(days=60, limit=1000)
         _hero_col1, _hero_col2, _hero_col3, _hero_col4 = st.columns(4)
-        _hero_col1.metric("本月订单", len(_orders_30d), help="近30天订单数")
-        _hero_col2.metric("老师储备学科", len(_capacities_all), help="teacher_capacity 表记录数")
-        _hero_col3.metric("订单风险信号", len(_order_risks_all), help="当前活跃风险信号数")
-        _hero_col4.metric("数据状态", "✅ 充足" if _has_data else "⚠️ 有限")
+        _hero_col1.metric("近30天订单", len(_orders_30d), delta=f"vs 前30天 {len(_orders_60d)-len(_orders_30d):+d}单")
+        _hero_col2.metric("近30天营收", f"元{_orders_30d_amt:,.0f}", help="近30天订单金额汇总")
+        _hero_col3.metric("老师储备学科", len(_capacities_all), help="teacher_capacity 表记录数")
+        _hero_col4.metric("数据状态", "✅ 充足" if _has_data else "⚠️ 不足")
 
-        # 产品优先级卡（基于 promotion_boundary）
-        st.markdown("#### 产品推广优先级")
-        if not _promotion_boundary:
-            st.info("暂无推广边界数据。点击「更新产品供给分析」按钮生成。")
+        # ── 数据驱动产品分析（无需AI，实时计算）──────────────────────
+        st.markdown("#### 📊 产品实战数据（近30天 vs 前30天）")
+
+        # 计算各产品30天 vs 前30天数据
+        import datetime as _dtx
+        _cutoff30 = _dtx.datetime.utcnow() - _dtx.timedelta(days=30)
+        _cutoff60 = _dtx.datetime.utcnow() - _dtx.timedelta(days=60)
+
+        _prod_30: dict = {}
+        _prod_60_prev: dict = {}  # 31-60天
+        for _o in _orders_60d:
+            _p = _o.get("product") or "未知"
+            _amt = _o.get("amount") or 0
+            _odate = _o.get("order_date", "")
+            try:
+                _od = _dtx.datetime.fromisoformat(_odate[:19])
+                if _od >= _cutoff30:
+                    _prod_30[_p] = _prod_30.get(_p, {"cnt": 0, "amt": 0})
+                    _prod_30[_p]["cnt"] += 1
+                    _prod_30[_p]["amt"] += _amt
+                else:
+                    _prod_60_prev[_p] = _prod_60_prev.get(_p, {"cnt": 0, "amt": 0})
+                    _prod_60_prev[_p]["cnt"] += 1
+                    _prod_60_prev[_p]["amt"] += _amt
+            except Exception:
+                pass
+
+        _all_prods = sorted(set(list(_prod_30.keys()) + list(_prod_60_prev.keys())),
+                            key=lambda x: -_prod_30.get(x, {}).get("cnt", 0))
+
+        if _all_prods:
+            _pcols = st.columns(min(len(_all_prods), 4))
+            for _i, _prod in enumerate(_all_prods[:8]):
+                _p30 = _prod_30.get(_prod, {"cnt": 0, "amt": 0})
+                _p60 = _prod_60_prev.get(_prod, {"cnt": 0, "amt": 0})
+                _delta_cnt = _p30["cnt"] - _p60["cnt"]
+                _avg_price = (_p30["amt"] / _p30["cnt"]) if _p30["cnt"] > 0 else 0
+                # 推广建议标签
+                if _p30["cnt"] >= 10 and _delta_cnt > 0:
+                    _badge = "🟢 强推"
+                elif _p30["cnt"] >= 5:
+                    _badge = "🔵 维持"
+                elif _p30["cnt"] < 3 and _p60["cnt"] > 5:
+                    _badge = "🔴 下滑"
+                else:
+                    _badge = "🟡 观察"
+                with _pcols[_i % 4]:
+                    with st.container(border=True):
+                        st.markdown(f"**{_prod}**")
+                        st.caption(_badge)
+                        st.metric("近30天单量", _p30["cnt"], delta=f"{_delta_cnt:+d}" if _delta_cnt else None)
+                        st.caption(f"均价 元{_avg_price:,.0f} | 营收 元{_p30['amt']:,.0f}")
         else:
-            # 定义优先级标签颜色
+            st.info("暂无订单数据，请先导入 orders.csv")
+
+        st.divider()
+
+        # ── 产品趋势深度分析 ────────────────────────────────────────
+        st.markdown("#### 📈 产品趋势与渠道分析")
+        _trend_c1, _trend_c2 = st.columns(2)
+
+        with _trend_c1:
+            st.markdown("**按产品：近30天单量排名**")
+            if _prod_30:
+                _prod_sorted = sorted(_prod_30.items(), key=lambda x: -x[1]["cnt"])
+                for _rank, (_pn, _pd) in enumerate(_prod_sorted[:6], 1):
+                    _prev_cnt = _prod_60_prev.get(_pn, {}).get("cnt", 0)
+                    _trend_icon = "▲" if _pd["cnt"] > _prev_cnt else ("▼" if _pd["cnt"] < _prev_cnt else "→")
+                    _bar_w = int(_pd["cnt"] / max(v["cnt"] for v in _prod_30.values()) * 100)
+                    st.markdown(
+                        f"`#{_rank}` **{_pn}** {_trend_icon}  \n"
+                        f"{'█' * (_bar_w // 10)}{'░' * (10 - _bar_w // 10)} "
+                        f"{_pd['cnt']}单 | 元{_pd['amt']:,.0f}"
+                    )
+            else:
+                st.caption("暂无数据")
+
+        with _trend_c2:
+            st.markdown("**按销售负责人：近30天成交**")
+            _owner_30: dict = {}
+            for _o in _orders_30d:
+                _ow = _o.get("sales_owner") or "未分配"
+                _owner_30[_ow] = _owner_30.get(_ow, {"cnt": 0, "amt": 0})
+                _owner_30[_ow]["cnt"] += 1
+                _owner_30[_ow]["amt"] += _o.get("amount") or 0
+            if _owner_30:
+                for _ow, _od in sorted(_owner_30.items(), key=lambda x: -x[1]["cnt"])[:6]:
+                    st.markdown(f"**{_ow}** — {_od['cnt']}单 | 元{_od['amt']:,.0f}")
+            else:
+                st.caption("暂无数据")
+
+        st.divider()
+
+        # ── AI供给分析产品推广优先级 ──────────────────────────────────
+        if _promotion_boundary:
+            st.markdown("#### 🤖 AI产品供给分析（推广边界）")
             _PUSH_BADGE = {
                 "strong":   ("P0 强推", "🟢"),
                 "normal":   ("P1 正常", "🔵"),
@@ -1015,17 +2222,16 @@ elif page == "📈 产品推广策略台":
                     with st.container(border=True):
                         st.markdown(f"**{_pb.get('product','')}**")
                         st.caption(f"{_badge_icon} {_badge_text}")
-                        st.caption(_pb.get("reason","")[:60])
+                        st.caption(_pb.get("reason","")[:80])
                         if _pb.get("tight_subjects"):
                             st.caption(f"⚠️ 资源紧张：{'/'.join(_pb['tight_subjects'][:2])}")
+            st.divider()
 
-        st.divider()
-
-        # 月度策略报告展示
-        st.markdown("#### 已生成的月度策略报告")
+        # ── 月度AI策略报告 ─────────────────────────────────────────
+        st.markdown("#### 🤖 AI月度推广策略报告")
         _monthly_suggestions = list_suggestions(suggestion_type="monthly_promotion_strategy", limit=6)
         if not _monthly_suggestions:
-            st.info("暂无月度策略。点击上方「生成本月推广策略」按钮。")
+            st.info("暂无AI月度策略。点击上方「🚀 生成本月推广策略」按钮（约30秒），AI将基于以上真实数据生成详细策略。")
         else:
             for _s in _monthly_suggestions:
                 _created = str(_s.get("created_at", ""))[:16]
@@ -1035,29 +2241,17 @@ elif page == "📈 产品推广策略台":
                     _mc1.metric("月份", _basis.get("target_month", "—"))
                     _mc2.metric("数据量", f"{_basis.get('order_count', 0)}单")
                     _mc3.metric("数据状态", "✅ 充足" if _basis.get("data_sufficient") else "⚠️ 有限")
-                    # 依据来源展示
                     _facts_at_gen = _basis.get("facts_count", 0)
                     _src_note = _basis.get("data_source_note", "")
                     _missing_at_gen = _basis.get("missing_info", [])
-                    with st.container():
-                        if _facts_at_gen and _facts_at_gen > 0:
-                            st.markdown(
-                                f"""<div style="background:#0f2a1a;border:1px solid #166534;border-radius:6px;padding:8px 12px;margin:8px 0;font-size:12px;color:#86efac">
-                                📎 <b>依据来源</b> | 生成时已确认事实：{_facts_at_gen} 条 | {_src_note.split(chr(10))[0] if _src_note else ''}
-                                </div>""",
-                                unsafe_allow_html=True
-                            )
-                        else:
-                            st.markdown(
-                                """<div style="background:#2a1a0f;border:1px solid #92400e;border-radius:6px;padding:8px 12px;margin:8px 0;font-size:12px;color:#fcd34d">
-                                ⚠️ <b>临时参考</b> | 生成时无已确认事实，建议可靠性有限。请到「公司资料学习中心」上传并确认资料。
-                                </div>""",
-                                unsafe_allow_html=True
-                            )
-                        if _missing_at_gen:
-                            with st.expander(f"📋 生成时缺少 {len(_missing_at_gen)} 项资料（展开查看）"):
-                                for _m in _missing_at_gen:
-                                    st.caption(f"- {_m}")
+                    if _facts_at_gen and _facts_at_gen > 0:
+                        st.caption(f"📎 依据来源 | 已确认事实：{_facts_at_gen} 条 | {_src_note.split(chr(10))[0] if _src_note else ''}")
+                    else:
+                        st.warning("⚠️ 临时参考 | 生成时无已确认事实，建议可靠性有限。")
+                    if _missing_at_gen:
+                        with st.expander(f"📋 生成时缺少 {len(_missing_at_gen)} 项资料"):
+                            for _m in _missing_at_gen:
+                                st.caption(f"- {_m}")
                     st.markdown(_s.get("content", ""))
 
     # ══════════════════════════════════════════════
@@ -1077,11 +2271,11 @@ elif page == "📈 产品推广策略台":
             _week_input = st.text_input("周起始日期（周一）", value=_default_week, placeholder="2026-06-09", key="week_input")
         with _wc2:
             st.write(""); st.write("")
-            _gen_sales = st.button("📊 生成销售建议", use_container_width=True, key="gen_sales")
+            _gen_sales = st.button("📊 生成销售建议", width='stretch', key="gen_sales")
         with _wc3:
             st.write(""); st.write("")
-            _gen_mkt = st.button("📣 生成市场内容包", use_container_width=True, key="gen_mkt")
-        _gen_both = st.button("🚀 生成本周推广建议（销售+市场+供给分析）", type="primary", use_container_width=True, key="gen_both")
+            _gen_mkt = st.button("📣 生成市场内容包", width='stretch', key="gen_mkt")
+        _gen_both = st.button("🚀 生成本周推广建议（销售+市场+供给分析）", type="primary", width='stretch', key="gen_both")
 
         if _gen_both or _gen_sales or _gen_mkt:
             _wk = _week_input.strip() or _default_week
@@ -1207,16 +2401,16 @@ elif page == "📈 产品推广策略台":
     with _tab_dept:
         st.subheader("🏢 本周各部门动作")
 
-        _dept_names = ["推广部", "顾问", "学管", "后台", "管理层"]
-        _dept_icons = {"推广部": "📣", "顾问": "💼", "后台": "📦", "学管": "👩‍🏫", "管理层": "🏆"}
+        _dept_names = ["市场部", "销售部", "产品部", "学管部", "管理层"]
+        _dept_icons = {"市场部": "📣", "销售部": "💼", "产品部": "📦", "学管部": "👩‍🏫", "管理层": "🏆"}
         _dept_actions_map = {
             _da.get("department", ""): _da.get("actions", [])
             for _da in _supply_data.get("department_actions", [])
         }
 
-        # 推广部 + 顾问 并排
+        # 市场部 + 销售部 并排
         _dc1, _dc2 = st.columns(2)
-        for _dept, _col in [("推广部", _dc1), ("顾问", _dc2)]:
+        for _dept, _col in [("市场部", _dc1), ("销售部", _dc2)]:
             with _col:
                 with st.container(border=True):
                     st.markdown(f"#### {_dept_icons.get(_dept,'')} {_dept}")
@@ -1227,9 +2421,9 @@ elif page == "📈 产品推广策略台":
                     else:
                         st.caption("暂无动作建议，请先运行供给分析。")
 
-        # 学管（重点展示，因为涉及交付风险判断）
+        # 产品部（重点展示）
         with st.container(border=True):
-            st.markdown("#### 👩‍🏫 学管（核心：推广边界判断 + 老师储备 + 订单风险反馈）")
+            st.markdown("#### 📦 产品部（核心：推广边界 + 老师储备 + 订单风险）")
             _p_c1, _p_c2, _p_c3, _p_c4 = st.columns(4)
 
             # 订单分布
@@ -1276,25 +2470,25 @@ elif page == "📈 产品推广策略台":
                 else:
                     st.caption("暂无推广边界数据")
 
-            # 学管建议动作
-            _pd_actions = _dept_actions_map.get("学管", _dept_actions_map.get("管理层", []))
+            # 产品部建议动作
+            _pd_actions = _dept_actions_map.get("产品部", _dept_actions_map.get("管理层", []))
             if _pd_actions:
                 st.markdown("**本周建议动作：**")
                 for _act in _pd_actions:
                     st.markdown(f"- {_act}")
 
-        # 后台 + 管理层 并排
+        # 学管部 + 管理层 并排
         _dc3, _dc4 = st.columns(2)
-        for _dept2, _col2 in [("后台", _dc3), ("管理层", _dc4)]:
+        for _dept2, _col2 in [("学管部", _dc3), ("管理层", _dc4)]:
             with _col2:
                 with st.container(border=True):
                     st.markdown(f"#### {_dept_icons.get(_dept2,'')} {_dept2}")
                     _actions2 = _dept_actions_map.get(_dept2, [])
-                    if _dept2 == "后台" and not _actions2:
+                    if _dept2 == "学管部" and not _actions2:
                         _actions2 = [
-                            "补充本周主推产品话术和卖点资料",
-                            "更新风控边界说明（哪些产品谨慎推）",
-                            "维护学校/产品基础数据",
+                            "反馈本周各学科老师可接单数量",
+                            "标记高风险订单（DDL 48小时内、计算类复杂考试）",
+                            "更新不可承诺话术清单",
                         ]
                     if _actions2:
                         for _act2 in _actions2:
@@ -1372,205 +2566,530 @@ elif page == "📈 产品推广策略台":
 
 
 # ══════════════════════════════════════════════
-# 页面 1：公司增长看板
+# 页面 1：老板驾驶舱
 # ══════════════════════════════════════════════
 elif page in ("📊 老板驾驶舱", "📊 公司增长看板"):
-    # ── 数据加载 ────────────────────────────
-    _dash_stats   = get_dashboard_stats()
-    _task_stats   = get_task_stats()
-    _order_stats7 = get_order_stats(days=7)
-    _order_stats30= get_order_stats(days=30)
-    _lead_stats7  = get_lead_stats(days=7)
-    _lead_stats30 = get_lead_stats(days=30)
+    import datetime as _bdt
 
-    _has_real_orders = (_order_stats30.get("total", 0) > 0)
-    _has_real_leads  = (_lead_stats30.get("total", 0) > 0)
-    _data_status = (
-        f"近30天真实订单 {_order_stats30.get('total', 0)} 单 · "
-        f"咨询线索 {_lead_stats30.get('total', 0)} 条 · "
-        f"待审核内容 {_dash_stats.get('pending', 0)} 条"
-    ) if (_has_real_orders or _has_real_leads) else "⚠️ 当前为演示数据，上传真实订单和咨询后数据将自动更新"
+    st.markdown("## 📊 老板驾驶舱")
+    st.caption(f"基础版 · 只展示真实任务/审批/逾期/上线状态/风险记录 · {datetime.now().strftime('%Y-%m-%d %H:%M')} 更新")
 
-    # ── Hero ────────────────────────────────
-    render_hero(
-        "📊 公司增长看板",
-        "查看当前市场机会、主推产品、内容进展和部门执行情况，掌握全局。",
-        _data_status,
-    )
+    try:
+        from database.crud import list_product_launches as _boss_list_launches
+    except Exception:
+        _boss_list_launches = lambda: []
 
-    # ── Hero 主操作按钮 ──────────────────────
-    _hb1, _hb2, _hb3, _hb_spacer = st.columns([1, 1, 1, 3])
-    if _hb1.button("📋 生成今日简报", use_container_width=True):
-        st.session_state["_run_brief"] = True
-    if _hb2.button("📡 更新市场信号", use_container_width=True):
-        st.session_state["_run_signals"] = True
-    if _hb3.button("📈 查看本周推广建议", use_container_width=True):
-        st.session_state["page_override"] = "📈 产品推广策略台"
+    _boss_tasks = list_tasks(limit=500)
+    _boss_launches = _boss_list_launches()
+    _boss_risks = list_order_risks(limit=100)
+    _boss_feedbacks = list_feedbacks(status="open")
+    _today_boss = datetime.now().date().isoformat()
+    _active_tasks = [t for t in _boss_tasks if t.get("status") in ("todo", "doing", "blocked")]
+    _overdue_tasks = [
+        t for t in _active_tasks
+        if (t.get("due_date") or "")[:10] and (t.get("due_date") or "")[:10] < _today_boss
+    ]
+    _pending_approvals = [p for p in _boss_launches if (p.get("mgmt_approval") or "pending") == "pending"]
 
-    if st.session_state.get("_run_brief"):
-        del st.session_state["_run_brief"]
-        with st.spinner("正在生成今日简报..."):
-            import subprocess, os
-            r = subprocess.run(
-                ["uv", "run", "--with", "anthropic", "python", "main.py", "daily-brief"],
-                cwd=str(ROOT), capture_output=True, text=True, env={**os.environ}
-            )
-        if r.returncode == 0:
-            st.success("✅ 今日简报已生成，请查看推送")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("真实待办", len(_active_tasks))
+    k2.metric("真实逾期", len(_overdue_tasks))
+    k3.metric("待审批上线卡", len(_pending_approvals))
+    k4.metric("产品上线卡", len(_boss_launches))
+    k5.metric("开放风险/反馈", len(_boss_risks) + len(_boss_feedbacks))
+
+    st.divider()
+
+    c_task, c_approval = st.columns(2)
+    with c_task:
+        st.markdown("### 真实逾期任务")
+        if _overdue_tasks:
+            st.dataframe(pd.DataFrame(_overdue_tasks)[["id", "title", "department", "priority", "status", "due_date"]], width="stretch", hide_index=True)
         else:
-            st.error(f"生成失败：{r.stderr[:200]}")
+            st.info("暂无真实数据，无法判断。")
 
-    if st.session_state.get("_run_signals"):
-        del st.session_state["_run_signals"]
-        with st.spinner("正在更新市场信号（约20秒）..."):
-            import subprocess, os
-            r = subprocess.run(
-                ["uv", "run", "--with", "anthropic", "python", "main.py", "update-market-signals"],
-                cwd=str(ROOT), capture_output=True, text=True, env={**os.environ}
-            )
-        if r.returncode == 0:
-            st.success("✅ 市场信号已更新")
-            st.rerun()
+    with c_approval:
+        st.markdown("### 真实审批")
+        if _pending_approvals:
+            _approval_rows = [{
+                "id": p.get("id"),
+                "产品": p.get("product_name"),
+                "阶段": p.get("stage"),
+                "审批": p.get("mgmt_approval") or "pending",
+                "意见": p.get("mgmt_approval_note") or "",
+            } for p in _pending_approvals]
+            st.dataframe(pd.DataFrame(_approval_rows), width="stretch", hide_index=True)
         else:
-            st.error(f"更新失败：{r.stderr[:200]}")
+            st.info("暂无真实数据，无法判断。")
 
-    st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+    st.divider()
+    st.markdown("### 真实产品上线状态")
+    if _boss_launches:
+        _launch_rows = [{
+            "id": p.get("id"),
+            "产品": p.get("product_name"),
+            "目录ID": p.get("catalog_id"),
+            "阶段": p.get("stage"),
+            "顾问": p.get("advisor_owner") or "",
+            "学管": p.get("xueguan_owner") or "",
+            "后台": p.get("backend_owner") or "",
+            "下一步": p.get("next_action") or "",
+        } for p in _boss_launches]
+        st.dataframe(pd.DataFrame(_launch_rows), width="stretch", hide_index=True)
+    else:
+        st.info("暂无真实数据，无法判断。")
 
-    # ── 核心指标卡（5个）───────────────────────
-    _mc = st.columns(5)
-    render_metric(_mc[0], _lead_stats7.get("total", 0),   "近7天咨询",   "条新咨询",   "#3b82f6")
-    render_metric(_mc[1], _order_stats7.get("total", 0),  "近7天成交",   "单订单",     "#10b981")
-    render_metric(_mc[2], _dash_stats.get("pending", 0),   "待审核内容",   "条草稿待审","#f59e0b")
-    render_metric(_mc[3], _task_stats.get("todo", 0),      "待执行任务",   "条任务",    "#6366f1")
-    render_metric(_mc[4], _dash_stats.get("high_feedback",0), "高危反馈",  "需立即处理","#ef4444")
-
-    st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
-
-    # ── 三栏主体 ─────────────────────────────
-    _col_l, _col_m, _col_r = st.columns([5, 4, 3])
-
-    with _col_l:
-        # 本周重点
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">🎯 本周重点关注</div>', unsafe_allow_html=True)
-
-        _weekly_sg = list_suggestions(suggestion_type="weekly_sales_suggestion", limit=1)
-        if _weekly_sg:
-            _ws = _weekly_sg[0]
-            _ws_preview = (_ws.get("content") or "")[:400]
-            st.markdown(f"**{_ws.get('title','')}**")
-            st.markdown(_ws_preview + ("..." if len(_ws.get("content","")) > 400 else ""))
-            with st.expander("查看完整本周销售建议"):
-                st.markdown(_ws.get("content",""))
+    st.divider()
+    c_risk, c_feedback = st.columns(2)
+    with c_risk:
+        st.markdown("### 真实风险记录")
+        if _boss_risks:
+            st.dataframe(pd.DataFrame(_boss_risks), width="stretch", hide_index=True)
         else:
-            render_empty_state(
-                "暂无本周销售建议",
-                "前往「产品推广策略台」生成本周推广建议，系统将自动分析销售重点。",
-            )
+            st.info("暂无真实数据，无法判断。")
+    with c_feedback:
+        st.markdown("### 真实开放反馈")
+        if _boss_feedbacks:
+            st.dataframe(pd.DataFrame(_boss_feedbacks), width="stretch", hide_index=True)
+        else:
+            st.info("暂无真实数据，无法判断。")
 
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
 
-        # 待审核内容快速通道
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">⏳ 待审核内容（快速通过）</div>', unsafe_allow_html=True)
-        _pending = list_contents(status="pending_review", limit=5)
-        if not _pending:
-            st.markdown('<div class="muted">暂无待审核内容 ✅</div>', unsafe_allow_html=True)
-        for _item in _pending:
-            _tl = TYPE_ZH.get(_item["content_type"], _item["content_type"])
-            _pl = PRODUCT_ZH.get(_item.get("product_id",""), "-")
-            _c1, _c2, _c3 = st.columns([4, 2, 1])
-            _c1.markdown(f"**{(_item['title'] or '无标题')[:28]}**")
-            _c1.caption(f"{_tl} · {_pl}")
-            _c2.markdown(f'<span class="badge badge-pending">待审核</span>', unsafe_allow_html=True)
-            if _c3.button("通过", key=f"qk_{_item['id']}"):
-                update_content_status(_item["id"], "approved")
-                st.rerun()
-            st.divider()
-        st.markdown('</div>', unsafe_allow_html=True)
+    # ══ 数据加载 ══════════════════════════════════════════════
+    try:
+        _now = _bdt.datetime.now()
+        _today = _now.strftime('%Y-%m-%d')
+        _this_month_s = _now.replace(day=1).strftime('%Y-%m-%d')
+        _last_m_end = _now.replace(day=1) - _bdt.timedelta(days=1)
+        _last_month_s = _last_m_end.replace(day=1).strftime('%Y-%m-%d')
+        _last_month_e = _last_m_end.strftime('%Y-%m-%d')
 
-    with _col_m:
-        # 高优反馈
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">🔴 需要立即处理</div>', unsafe_allow_html=True)
-        _fbs = list_feedbacks(status="open")
-        _high_fbs = [f for f in _fbs if f.get("urgency") in ("高","紧急")]
-        if not _high_fbs:
-            st.markdown('<div style="color:#10b981;padding:8px 0">✅ 当前暂无高危反馈，运营状态良好</div>', unsafe_allow_html=True)
-        for _fb in _high_fbs[:4]:
-            _u_icon = "🔴" if _fb.get("urgency") == "紧急" else "🟠"
-            st.markdown(f"""
-            <div class="risk-card">
-              <div class="risk-title">{_u_icon} {_fb.get('title','')}</div>
-              <div class="risk-desc">{_fb.get('department','')} · {_fb.get('feedback_type','')} · {str(_fb.get('created_at',''))[:10]}</div>
-              <div class="risk-desc" style="margin-top:4px">{(_fb.get('content') or '')[:80]}</div>
-            </div>""", unsafe_allow_html=True)
-            if st.button("标记处理中", key=f"fb_dash_{_fb['id']}", use_container_width=True):
-                update_feedback_status(_fb["id"], "in_progress")
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+        _s0   = get_order_stats(days=0)
+        _s30  = get_order_stats(days=30)
+        _s60  = get_order_stats(days=60)
+        _s7   = get_order_stats(days=7)
+        _s90  = get_order_stats(days=90)
+        _ls0  = get_lead_stats(days=0)
+        _ls30 = get_lead_stats(days=30)
 
-        # 高优建议
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">💡 待采纳的高优建议</div>', unsafe_allow_html=True)
-        _sgs = list_suggestions(status="new")
-        _high_sgs = [s for s in _sgs if s.get("priority") in ("高","紧急")][:3]
-        if not _high_sgs:
-            st.markdown('<div class="muted">暂无高优建议</div>', unsafe_allow_html=True)
-        for _sg in _high_sgs:
-            _p_color = "#ef4444" if _sg.get("priority") == "紧急" else "#f97316"
-            st.markdown(f"""
-            <div class="suggestion-row" style="border-left-color:{_p_color}">
-              <strong>{_sg.get('title','')}</strong><br>
-              <span class="muted">{_sg.get('suggestion_type','')} · {_sg.get('source','')}</span><br>
-              <span style="font-size:13px;color:#374151">{(_sg.get('recommendation') or '')[:80]}</span>
-            </div>""", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        _orders_60 = list_orders(days=60, limit=3000)
+        _has_order_data = bool(_orders_60)
+        _orders_this_month = [o for o in _orders_60 if (o.get('order_date') or '')[:10] >= _this_month_s]
+        _orders_last_month = [o for o in _orders_60 if _last_month_s <= (o.get('order_date') or '')[:10] <= _last_month_e]
 
-    with _col_r:
-        # 下一步建议
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">✅ 今天你应该做</div>', unsafe_allow_html=True)
+        _rev_this  = sum(o.get('amount') or 0 for o in _orders_this_month)
+        _rev_last  = sum(o.get('amount') or 0 for o in _orders_last_month)
+        _cnt_this  = len(_orders_this_month)
+        _cnt_last  = len(_orders_last_month)
 
-        _todo_actions = []
-        if _dash_stats.get("pending", 0) > 0:
-            _todo_actions.append(f"📝 审核 {_dash_stats['pending']} 条待审核内容")
-        if _high_fbs:
-            _todo_actions.append(f"🔴 处理 {len(_high_fbs)} 条高危反馈")
-        if not _weekly_sg if '_weekly_sg' in dir() else True:
-            _todo_actions.append("📈 生成本周推广建议")
-        if _task_stats.get("todo", 0) > 0:
-            _todo_actions.append(f"✅ 跟进 {_task_stats['todo']} 条待执行任务")
-        if not _has_real_orders:
-            _todo_actions.append("📂 上传真实订单数据")
-        if not _todo_actions:
-            _todo_actions = ["🎉 当前无紧急待办事项"]
+        # 月度目标（按上月实际×1.1为默认目标）
+        _monthly_target_orders = max(int(_cnt_last * 1.1), 200)
+        _monthly_target_rev = max(int(_rev_last * 1.1), 1000000)
 
-        for _i, _act in enumerate(_todo_actions[:5], 1):
-            st.markdown(f"""
-            <div class="step-item">
-              <div class="step-num">{_i}</div>
-              <div class="step-text">{_act}</div>
-            </div>""", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        # 今天是本月第几天，推算完成率
+        _day_of_month = _now.day
+        _days_in_month = (_now.replace(month=_now.month % 12 + 1, day=1) - _bdt.timedelta(days=1)).day if _now.month < 12 else 31
+        _progress_pct = _day_of_month / _days_in_month
+        _projected_rev = _rev_this / max(_progress_pct, 0.01)
+        _projected_cnt = _cnt_this / max(_progress_pct, 0.01)
+        _target_pct_rev = _rev_this / max(_monthly_target_rev, 1)
+        _on_track = _projected_rev >= _monthly_target_rev * 0.9
 
-        # 快速跳转
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">🔗 快速跳转</div>', unsafe_allow_html=True)
-        st.caption("👉 前往【📈 产品推广策略台】生成本周建议")
-        st.caption("👉 前往【📝 内容池】审核和管理素材")
-        st.caption("👉 前往【✅ 部门任务台】查看执行任务")
-        st.caption("👉 前往【📁 资料上传中心】导入数据")
-        st.markdown('</div>', unsafe_allow_html=True)
+    except Exception as _e_boss:
+        st.error(f"数据加载异常：{_e_boss}")
+        st.stop()
 
-        # 内容分布小图
-        _by_type = _dash_stats.get("by_type", {})
-        if _by_type:
-            st.markdown('<div class="section-card">', unsafe_allow_html=True)
-            st.markdown('<div class="section-title">📊 内容类型分布</div>', unsafe_allow_html=True)
-            _chart_data = {TYPE_ZH.get(k, k): v for k, v in _by_type.items() if v > 0}
-            st.bar_chart(_chart_data, height=160)
-            st.markdown('</div>', unsafe_allow_html=True)
+    if not _has_order_data:
+        st.info("no_data：orders 表暂无真实订单，老板驾驶舱不生成机会、风险或目标预测结论。")
+        st.stop()
+
+    # ══ Section 1：目标完成战况 ══════════════════════════════
+    _track_color = "#10b981" if _on_track else "#ef4444"
+    _track_label = "✅ 按当前趋势可完成月度目标" if _on_track else "⚠️ 按当前趋势无法完成月度目标，需要干预"
+    st.markdown(f"<div style='background:{_track_color}20;border-left:4px solid {_track_color};padding:10px 16px;border-radius:4px;margin-bottom:12px'><b style='color:{_track_color}'>{_track_label}</b><br><span style='color:#64748b;font-size:12px'>今日 {_today} · 本月已过 {_day_of_month}/{_days_in_month} 天 · 完成率 {_target_pct_rev:.0%}</span></div>", unsafe_allow_html=True)
+
+    _c1, _c2, _c3, _c4 = st.columns(4)
+    _c1.metric("本月订单", f"{_cnt_this}单", delta=f"预计全月{int(_projected_cnt)}单", delta_color="normal")
+    _c2.metric("本月营收", f"元{int(_rev_this/10000)}万", delta=f"预计元{int(_projected_rev/10000)}万", delta_color="normal")
+    _c3.metric("vs上月", f"{_cnt_last}单/{int(_rev_last/10000)}万", delta=f"环比{int((_cnt_this/_progress_pct-_cnt_last)/max(_cnt_last,1)*100):+d}%", delta_color="normal")
+    _c4.metric("目标进度", f"{_target_pct_rev:.0%}", delta=f"日均{int(_rev_this/max(_day_of_month,1)/10000*10)/10}万")
+
+    # 进度条
+    import pandas as _pd_boss
+    st.progress(min(_target_pct_rev, 1.0), text=f"营收目标：元{int(_rev_this):,} / 元{_monthly_target_rev:,}")
+
+    st.divider()
+
+    # ══ Section 2：最大机会 & 最大风险 ══════════════════════
+    _opp_col, _risk_col = st.columns(2)
+
+    with _opp_col:
+        st.markdown("### 🚀 当前最大增长机会")
+        try:
+            # 找增长最快的产品（近30天 vs 近60天日均）
+            _prod30 = dict(_s30['by_product'])
+            _prod60 = dict(_s60['by_product'])
+            _prod_growth = {}
+            for p, c30 in _prod30.items():
+                if not p or p == '未知': continue
+                c60_avg = _prod60.get(p, 0) / 2
+                if c60_avg > 0:
+                    _prod_growth[p] = (c30 - c60_avg) / c60_avg
+
+            if _prod_growth:
+                _hot_prod = max(_prod_growth, key=_prod_growth.get)
+                _hot_rate = _prod_growth[_hot_prod]
+                st.success(f"**产品机会：{PRODUCT_ZH.get(_hot_prod, _hot_prod)}**")
+                st.markdown(f"近30天环比增长 **{_hot_rate:+.0%}**，是当前最快增长产品。")
+
+            # 找需求上升最快的学校
+            _sch30 = dict(_s30['by_school'])
+            _sch90 = dict(_s90['by_school'])
+            _sch_growth = {}
+            for s, c30 in _sch30.items():
+                if not _is_valid_school(s): continue
+                c90_avg = _sch90.get(s, 0) / 3
+                if c90_avg > 0:
+                    _sch_growth[s] = (c30 - c90_avg) / c90_avg
+
+            if _sch_growth:
+                _hot_sch = max(_sch_growth, key=_sch_growth.get)
+                _hot_sch_rate = _sch_growth[_hot_sch]
+                st.info(f"**学校机会：{_hot_sch}**\n近30天环比增长 **{_hot_sch_rate:+.0%}**，建议加大该校推广投入。")
+
+        except Exception as _e_opp:
+            st.caption(f"机会分析：{_e_opp}")
+
+    with _risk_col:
+        st.markdown("### ⚠️ 当前最大风险")
+        try:
+            # 找下滑最快的产品
+            _risk_items = []
+            for p, c30 in _prod30.items():
+                if not p or p == '未知': continue
+                c60_avg = _prod60.get(p, 0) / 2
+                if c60_avg > 5 and c30 < c60_avg * 0.8:
+                    _risk_items.append((p, (c30 - c60_avg) / c60_avg))
+
+            if _risk_items:
+                _risk_items.sort(key=lambda x: x[1])
+                _worst_prod, _worst_rate = _risk_items[0]
+                st.error(f"**产品风险：{PRODUCT_ZH.get(_worst_prod, _worst_prod)}**")
+                st.markdown(f"近30天下滑 **{_worst_rate:.0%}**，需要排查原因。")
+
+            # 本月营收是否落后
+            if not _on_track:
+                _gap = _monthly_target_rev - _projected_rev
+                _days_left = _days_in_month - _day_of_month
+                _daily_needed = _gap / max(_days_left, 1)
+                st.warning(f"**完成风险：** 预计月末差 元{int(_gap/10000)}万\n剩余{_days_left}天需每天新增 元{int(_daily_needed/10000)}万")
+            else:
+                st.success("营收目标按当前趋势可完成 ✅")
+
+        except Exception as _e_risk:
+            st.caption(f"风险分析：{_e_risk}")
+
+    st.divider()
+
+    # ══ Section 3：本周作战焦点 ══════════════════════════════
+    st.markdown("### 🎯 本周作战焦点")
+    _fw1, _fw2, _fw3, _fw4 = st.columns(4)
+
+    try:
+        # 本周主推产品（近7天最高营收产品）
+        _prod_rev7 = dict(_s7.get('revenue_by_product', []))
+        _top_prod_week = max(_prod_rev7, key=_prod_rev7.get) if _prod_rev7 else None
+        _fw1.markdown("**📦 本周主推产品**")
+        if _top_prod_week:
+            _fw1.metric(PRODUCT_ZH.get(_top_prod_week, _top_prod_week),
+                       f"元{int(_prod_rev7[_top_prod_week]/10000)}万",
+                       delta="本周营收最高")
+        else:
+            _fw1.caption("数据计算中")
+        if _fw1.button("→ 推广策略", key="boss_to_strategy"):
+            st.session_state["page_jump"] = "📈 产品推广策略台"
+
+        # 本周重点学校
+        _sch7 = [(s, n) for s, n in _s7['by_school'] if _is_valid_school(s)]
+        _fw2.markdown("**🏫 本周重点学校**")
+        if _sch7:
+            _fw2.metric(_sch7[0][0][:8], f"{_sch7[0][1]}单", delta="本周最多")
+            if len(_sch7) > 1:
+                _fw2.caption(f"2位：{_sch7[1][0][:6]}({_sch7[1][1]}单)")
+        if _fw2.button("→ 学校情报", key="boss_to_school"):
+            st.session_state["page_jump"] = "🏫 学校增长情报台"
+
+        # 本周销售冠军
+        _orders_7d = list_orders(days=7, limit=500)
+        _owner_7d = {}
+        for _o7 in _orders_7d:
+            _own7 = ((_o7.get('sales_owner') or '未分配') + ' ').split()[0]
+            _owner_7d.setdefault(_own7, {'cnt':0,'amt':0})
+            _owner_7d[_own7]['cnt'] += 1
+            _owner_7d[_own7]['amt'] += _o7.get('amount') or 0
+        _fw3.markdown("**👑 本周销售冠军**")
+        if _owner_7d:
+            _top_owner = max(_owner_7d, key=lambda x: _owner_7d[x]['amt'])
+            _fw3.metric(_top_owner, f"{_owner_7d[_top_owner]['cnt']}单",
+                       delta=f"元{int(_owner_7d[_top_owner]['amt']/10000)}万")
+        if _fw3.button("→ 销售排行", key="boss_to_sales"):
+            st.session_state["page_jump"] = "💼 销售顾问作战台"
+
+        # 本周重点渠道：仅在 CRM 线索有 source_channel 时展示
+        _fw4.markdown("**📡 本周重点渠道**")
+        _ls7 = get_lead_stats(days=7)
+        _ch7 = [(c, n) for c, n in _ls7.get("by_channel", []) if c and c not in ("未知", "None", "")]
+        if _ch7:
+            _fw4.metric("重点推进", _ch7[0][0], delta=f"{_ch7[0][1]}条线索")
+            if len(_ch7) > 1:
+                _fw4.caption(f"2位：{_ch7[1][0]}({_ch7[1][1]}条)")
+        else:
+            _fw4.caption("no_data：leads.source_channel 暂无可用数据")
+        if _fw4.button("→ 渠道作战台", key="boss_to_channel"):
+            st.session_state["page_jump"] = "📡 渠道作战台"
+
+    except Exception as _e_focus:
+        st.caption(f"焦点数据：{_e_focus}")
+
+    st.divider()
+
+    # ══ Section 3.5：新产品上线状态 ══════════════════════════
+    st.markdown("### 🚀 新产品上线状态")
+    try:
+        from database.crud import list_product_launches as _list_product_launches_boss
+        _new_products = _list_product_launches_boss()[:5]
+        if _new_products:
+            _np_cols = st.columns(min(len(_new_products), 3))
+            for _npi, _np in enumerate(_new_products[:3]):
+                _np_col = _np_cols[_npi]
+                _np_status = _np.get('stage', '需求判断')
+                _np_status_label = _np_status
+                _np_col.markdown(f"**{_np.get('product_name','未知产品')[:12]}**")
+                _np_col.caption(_np_status_label)
+                _owners = [x for x in [_np.get('advisor_owner'), _np.get('xueguan_owner'), _np.get('backend_owner')] if x]
+                _np_col.caption(f"负责：{' / '.join(_owners) if _owners else '待分配'}")
+        else:
+            st.info("暂无新产品上线记录。[→ 新产品上线台](#)")
+        if st.button("→ 查看新产品上线台", key="boss_to_newprod"):
+            st.session_state["page_jump"] = "🚀 新产品上线台"
+    except Exception as _e_np:
+        st.caption(f"产品上线状态：{_e_np}")
+
+    st.divider()
+
+    # ══ Section 3.6：部门卡点分析 ══════════════════════════
+    st.markdown("### 🚧 当前哪个环节卡住了")
+    try:
+        _block_items = []
+
+        # 分析任务积压
+        from database.crud import list_tasks as _list_tasks_boss
+        _all_tasks_boss = _list_tasks_boss(status="todo", limit=200)
+        _today_str_boss = _now.strftime('%Y-%m-%d')
+        _overdue_tasks = [t for t in _all_tasks_boss if (t.get('due_date') or '9999') < _today_str_boss]
+        _dept_overdue = {}
+        for _ot in _overdue_tasks:
+            _dept_overdue[_ot.get('department','未分配')] = _dept_overdue.get(_ot.get('department','未分配'), 0) + 1
+
+        if _dept_overdue:
+            _worst_dept = max(_dept_overdue, key=_dept_overdue.get)
+            _block_items.append(f"**{_worst_dept}** 有 {_dept_overdue[_worst_dept]} 个任务逾期未完成")
+
+        # 分析月度目标偏差
+        if not _on_track:
+            _block_items.append(f"**营收目标** 当前完成率 {_target_pct_rev:.0%}，预计缺口 元{int((_monthly_target_rev - _projected_rev)/10000)}万")
+
+        # 分析产品下滑
+        if _risk_items:
+            _block_items.append(f"**产品交付/市场** — {PRODUCT_ZH.get(_risk_items[0][0], _risk_items[0][0])} 连续下滑")
+
+        if _block_items:
+            for _bi in _block_items:
+                st.warning(f"⚠️ {_bi}")
+        else:
+            st.success("✅ 各部门运转正常，无明显卡点。")
+
+        if st.button("→ 查看所有任务", key="boss_to_tasks"):
+            st.session_state["page_jump"] = "✅ 部门任务台"
+    except Exception as _e_block:
+        st.caption(f"卡点分析：{_e_block}")
+
+    st.divider()
+
+    # ══ Section 4：今天需要管理层决策的事项 ══════════════════
+    st.markdown("### 🔔 今天需要关注 & 决策")
+
+    try:
+        _decisions = []
+
+        # 决策1：如果本月目标有风险
+        if not _on_track:
+            _gap_orders = int(_monthly_target_orders - _projected_cnt)
+            _decisions.append({
+                "紧急度": "🔴 紧急",
+                "事项": f"本月订单预计缺口 **{_gap_orders}单**，需要决定：是否加大推广投入、是否启动促销活动",
+                "建议动作": "本周内拍板推广预算追加方案",
+                "责任部门": "管理层 + 市场部"
+            })
+
+        # 决策2：产品风险
+        if _risk_items:
+            _decisions.append({
+                "紧急度": "🟠 重要",
+                "事项": f"**{PRODUCT_ZH.get(_risk_items[0][0], _risk_items[0][0])}** 连续下滑，需排查是交付问题还是市场问题",
+                "建议动作": "召集产品+学管+销售三方对齐",
+                "责任部门": "产品部"
+            })
+
+        # 决策3：机会把握
+        if _prod_growth:
+            _decisions.append({
+                "紧急度": "🟡 机会",
+                "事项": f"**{PRODUCT_ZH.get(_hot_prod, _hot_prod)}** 正在爆发式增长，需要决定是否加仓资源",
+                "建议动作": "确认老师产能是否足够支撑增长",
+                "责任部门": "学管部 + 产品部"
+            })
+
+        if _decisions:
+            for _d in _decisions:
+                with st.expander(f"{_d['紧急度']} {_d['事项'][:60]}...", expanded=True):
+                    st.markdown(f"**完整描述：** {_d['事项']}")
+                    st.markdown(f"**建议动作：** {_d['建议动作']}")
+                    st.markdown(f"**责任部门：** {_d['责任部门']}")
+                    if st.button("📋 写入任务台", key=f"dec_task_{_decisions.index(_d)}"):
+                        _create_task_from_suggestion(
+                            title=_d['建议动作'],
+                            desc=_d['事项'],
+                            dept=_d['责任部门'],
+                            deadline_days=3,
+                            source_agent="老板驾驶舱自动生成",
+                            priority="紧急" if "紧急" in _d['紧急度'] else "高"
+                        )
+                        st.success("已写入任务台！")
+        else:
+            st.success("✅ 当前没有紧急决策事项，业务运转正常。")
+    except Exception as _e_dec:
+        st.caption(f"决策分析：{_e_dec}")
+
+    st.divider()
+
+    # ══ Section 5：AI行动建议（前3条）══════════════════════
+    st.markdown("### 💡 AI行动建议（今日）")
+
+    try:
+        _suggs_boss = list_suggestions(limit=50)
+        _suggs_boss = [
+            s for s in _suggs_boss
+            if (s.get("data_basis") or {}).get("guardrail", {}).get("validation_status") == "valid"
+        ]
+        # 优先显示sales和marketing建议
+        _suggs_sorted = sorted(_suggs_boss, key=lambda x: (
+            0 if 'sales' in (x.get('suggestion_type','')) else
+            1 if 'marketing' in (x.get('suggestion_type','')) else 2
+        ))[:3]
+
+        if _suggs_sorted:
+            for _sg in _suggs_sorted:
+                _sg_type_raw = _sg.get('suggestion_type', '建议')
+                _sg_type_label = {
+                    'weekly_sales_suggestion_v2': '💼 销售建议',
+                    'weekly_marketing_suggestion': '📢 市场建议',
+                    'daily_reminder': '📅 每日提醒',
+                    'product_supply_risk': '⚠️ 产品风险',
+                }.get(_sg_type_raw, f'📋 {_sg_type_raw}')
+                _sg_text = (_sg.get('recommendation') or _sg.get('content') or '')[:300]
+                _sg_date = (_sg.get('created_at') or '')[:10]
+                _guard = (_sg.get("data_basis") or {}).get("guardrail", {})
+
+                with st.expander(f"**{_sg_type_label}** — {_sg_date}", expanded=True):
+                    st.markdown(_sg_text)
+                    st.caption(
+                        f"evidence: {_guard.get('evidence') or '—'} | "
+                        f"confidence: {_guard.get('confidence') or '—'} | "
+                        f"responsible_role: {_guard.get('responsible_role') or '—'}"
+                    )
+                    _btn_cols = st.columns([1, 1, 4])
+                    if _btn_cols[0].button("📋 转任务", key=f"boss_sg_{_suggs_sorted.index(_sg)}"):
+                        _dept_map = {'weekly_sales_suggestion_v2':'销售部', 'weekly_marketing_suggestion':'市场部', 'daily_reminder':'管理层', 'product_supply_risk':'产品部'}
+                        _create_task_from_suggestion(
+                            title=_sg_text[:50],
+                            desc=_sg_text,
+                            dept=_dept_map.get(_sg_type_raw, '市场部'),
+                            deadline_days=7,
+                            source_agent=_sg_type_raw,
+                        )
+                        st.success("✅ 已写入部门任务台")
+        else:
+            st.info("AI建议今日尚未生成（每日08:30自动运行）")
+    except Exception as _e_sg:
+        st.caption(f"建议加载：{_e_sg}")
+
+    st.divider()
+
+    # ══ Section 6：各产品本月表现 ══════════════════════════
+    st.markdown("### 📦 产品本月战况")
+    try:
+        _prod_cnt_this = {}
+        _prod_rev_this = {}
+        for _o in _orders_this_month:
+            _p = _o.get('product') or '未知'
+            _prod_cnt_this[_p] = _prod_cnt_this.get(_p, 0) + 1
+            _prod_rev_this[_p] = _prod_rev_this.get(_p, 0) + (_o.get('amount') or 0)
+
+        _prod_cnt_last = {}
+        _prod_rev_last = {}
+        for _o in _orders_last_month:
+            _p = _o.get('product') or '未知'
+            _prod_cnt_last[_p] = _prod_cnt_last.get(_p, 0) + 1
+            _prod_rev_last[_p] = _prod_rev_last.get(_p, 0) + (_o.get('amount') or 0)
+
+        all_prods = set(list(_prod_cnt_this.keys()) + list(_prod_cnt_last.keys())) - {'未知', None}
+        if all_prods:
+            _prod_rows_boss = []
+            for _p in sorted(all_prods, key=lambda x: -_prod_rev_this.get(x, 0)):
+                _c_this = _prod_cnt_this.get(_p, 0)
+                _c_last = _prod_cnt_last.get(_p, 0)
+                _r_this = _prod_rev_this.get(_p, 0)
+                _r_last = _prod_rev_last.get(_p, 0)
+                _trend = f"{int((_c_this/_progress_pct-_c_last)/max(_c_last,1)*100):+d}%" if _c_last else "新品"
+                _status = "🟢" if _c_this >= _c_last * _progress_pct * 0.9 else "🔴"
+                _prod_rows_boss.append({
+                    '状态': _status,
+                    '产品': PRODUCT_ZH.get(_p, _p),
+                    '本月单量': _c_this,
+                    '本月营收': f"元{int(_r_this):,}",
+                    '上月单量': _c_last,
+                    '环比趋势': _trend,
+                })
+            st.dataframe(_pd_boss.DataFrame(_prod_rows_boss), width='stretch', hide_index=True)
+    except Exception as _e_pt:
+        st.caption(f"产品战况：{_e_pt}")
+
+    st.divider()
+
+    # ══ Section 7：销售团队本月排行 ══════════════════════
+    st.markdown("### 👥 本月销售团队战况")
+    try:
+        _owner_this = {}
+        for _o in _orders_this_month:
+            _own = ((_o.get('sales_owner') or '未分配') + ' ').split()[0]
+            _owner_this.setdefault(_own, {'cnt':0,'amt':0})
+            _owner_this[_own]['cnt'] += 1
+            _owner_this[_own]['amt'] += _o.get('amount') or 0
+
+        if _owner_this:
+            _team_rows = []
+            for _rank, (_own, _d) in enumerate(sorted(_owner_this.items(), key=lambda x: -x[1]['amt']), 1):
+                _avg = int(_d['amt'] / max(_d['cnt'], 1))
+                _team_rows.append({
+                    '排名': _rank, '顾问': _own, '本月单量': _d['cnt'],
+                    '本月营收': f"元{int(_d['amt']):,}", '客单价': f"元{_avg:,}",
+                    '状态': '🥇' if _rank==1 else ('🥈' if _rank==2 else ('🥉' if _rank==3 else ''))
+                })
+            st.dataframe(_pd_boss.DataFrame(_team_rows), width='stretch', hide_index=True)
+    except Exception as _e_team:
+        st.caption(f"团队数据：{_e_team}")
 
 
 # ══════════════════════════════════════════════
@@ -1578,6 +3097,66 @@ elif page in ("📊 老板驾驶舱", "📊 公司增长看板"):
 # ══════════════════════════════════════════════
 elif page == "📅 营销日历":
     st.title("📅 营销日历")
+
+    # ── 季节性热点分析（直接从订单数据计算）──
+    try:
+        st.markdown("### 📈 历史订单：月度旺季分析（2023-2026全量）")
+        import pandas as _pd_cal
+        _orders_cal = list_orders(days=1825, limit=20000)
+        _month_bucket: dict = {}
+        _month_rev_bucket: dict = {}
+        for _oc in _orders_cal:
+            _ym = (_oc.get('order_date') or '')[:7]
+            if len(_ym) == 7:
+                _m_key = _ym[5:]  # 月份 "01"~"12"
+                _month_bucket[_m_key] = _month_bucket.get(_m_key, 0) + 1
+                _month_rev_bucket[_m_key] = _month_rev_bucket.get(_m_key, 0) + (_oc.get('amount') or 0)
+
+        _month_name = {'01':'1月','02':'2月','03':'3月','04':'4月','05':'5月','06':'6月',
+                       '07':'7月','08':'8月','09':'9月','10':'10月','11':'11月','12':'12月'}
+        if _month_bucket:
+            _max_m = max(_month_bucket.values())
+            _cal_rows = []
+            for _mk in sorted(_month_bucket):
+                _cnt_m = _month_bucket[_mk]
+                _rev_m = _month_rev_bucket.get(_mk, 0)
+                _label = _month_name.get(_mk, _mk)
+                _tag = '🔥旺季' if _cnt_m >= _max_m * 0.8 else ('📈较旺' if _cnt_m >= _max_m * 0.5 else '❄️淡季')
+                _cal_rows.append({'月份': _label, '历史订单量(月均)': _cnt_m,
+                                  '月均营收': f"元{int(_rev_m):,}", '旺淡季': _tag})
+            _df_cal = _pd_cal.DataFrame(_cal_rows)
+            st.dataframe(_df_cal, width='stretch', hide_index=True)
+
+            _top3_cal = sorted(_cal_rows, key=lambda x: -x['历史订单量(月均)'])[:3]
+            _top3_names = '、'.join(r['月份'] for r in _top3_cal)
+            _top3_hint = '、'.join(r['月份'] for r in sorted(_cal_rows, key=lambda x: -x['历史订单量(月均)'])[:2])
+            st.info(f"📌 旺季TOP3月份：**{_top3_names}**，建议在旺季前4-6周启动推广预热，加大投放预算。")
+
+            # 近12个月趋势
+            st.markdown("### 📅 近12个月实际走势")
+            _recent_monthly: dict = {}
+            _recent_rev: dict = {}
+            for _oc in _orders_cal:
+                _ym2 = (_oc.get('order_date') or '')[:7]
+                if len(_ym2) == 7:
+                    _recent_monthly[_ym2] = _recent_monthly.get(_ym2, 0) + 1
+                    _recent_rev[_ym2] = _recent_rev.get(_ym2, 0) + (_oc.get('amount') or 0)
+            _months_12 = sorted(_recent_monthly)[-12:]
+            _trend_rows = []
+            for _m12 in _months_12:
+                _cnt12 = _recent_monthly[_m12]
+                _rev12 = _recent_rev.get(_m12, 0)
+                _trend_rows.append({'月份': _m12, '订单数': _cnt12, '营收(万元)': round(_rev12/10000, 1)})
+            _trend_df = _pd_cal.DataFrame(_trend_rows).set_index('月份')
+            _tc1, _tc2 = st.columns(2)
+            _tc1.bar_chart(_trend_df[['订单数']], height=200)
+            _tc2.bar_chart(_trend_df[['营收(万元)']], height=200)
+        else:
+            st.info("暂无历史订单数据")
+    except Exception as _e_cal:
+        st.warning(f"季节性数据加载失败：{_e_cal}")
+
+    st.divider()
 
     # 筛选
     f1, f2, f3 = st.columns(3)
@@ -1616,7 +3195,7 @@ elif page == "📅 营销日历":
                             "状态": STATUS_ZH.get(r["status"], r["status"]),
                             "产品": PRODUCT_ZH.get(r.get("product_id",""), r.get("product_id","") or "-"),
                         })
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
 
 # ══════════════════════════════════════════════
@@ -1639,11 +3218,11 @@ elif page in ("📝 推广素材台", "📝 内容池"):
 
     # ── Hero 操作 ───────────────────────────
     _cb1, _cb2, _cb3, _cb4, _cb_sp = st.columns([1.2, 1.2, 1.2, 1.2, 2])
-    _filter_pending = _cb2.button("⏳ 查看待审核", use_container_width=True,
+    _filter_pending = _cb2.button("⏳ 查看待审核", width='stretch',
                                    type="primary" if _cnt_pending > 0 else "secondary")
-    _filter_approved = _cb3.button("✅ 查看可用素材", use_container_width=True)
-    _show_all = _cb1.button("📋 查看全部内容", use_container_width=True)
-    if _cb4.button("🔄 刷新列表", use_container_width=True):
+    _filter_approved = _cb3.button("✅ 查看可用素材", width='stretch')
+    _show_all = _cb1.button("📋 查看全部内容", width='stretch')
+    if _cb4.button("🔄 刷新列表", width='stretch'):
         st.rerun()
 
     st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
@@ -1657,6 +3236,48 @@ elif page in ("📝 推广素材台", "📝 内容池"):
     render_metric(_sc[4], _cnt_used,          "已使用",   "已发布/发出", "#8b5cf6")
 
     st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
+
+    # ── 内容策略参考（内容库为空时重点展示）────────────
+    if len(_all_contents) == 0:
+        st.info("📌 内容库当前为空。以下是基于订单数据的**内容创作优先级建议**，可参考生成素材：")
+        try:
+            import pandas as _pd_content
+            _s0_ct = get_order_stats(days=0)
+            _s30_ct = get_order_stats(days=30)
+            _prod_cnt = dict(_s0_ct['by_product'])
+            _prod_rev = dict(_s0_ct.get('revenue_by_product', []))
+            _sch_cnt  = dict(_s0_ct['by_school'])
+            _valid_sch_ct = [s for s in _sch_cnt if _is_valid_school(s)]
+
+            _cc1, _cc2 = st.columns(2)
+            with _cc1:
+                st.markdown("**📦 应重点推广的产品（按营收）**")
+                _ct_prod_rows = []
+                for p, rev in sorted(_prod_rev.items(), key=lambda x: -x[1]):
+                    if not p or p == '未知': continue
+                    _ct_prod_rows.append({
+                        '产品': p, '总营收': f"元{int(rev):,}",
+                        '订单量': _prod_cnt.get(p, 0),
+                        '内容方向': '高客单精品稿' if rev/_s0_ct['total_amount'] > 0.15 else '走量爆款'
+                    })
+                st.dataframe(_pd_content.DataFrame(_ct_prod_rows[:6]), width='stretch', hide_index=True)
+
+            with _cc2:
+                st.markdown("**🏫 应重点覆盖的学校（Top10）**")
+                _ct_sch_rows = [{'学校': s, '历史订单': _sch_cnt[s],
+                                  '内容优先级': '🔴高' if _sch_cnt[s] > 500 else ('🟡中' if _sch_cnt[s] > 100 else '🟢普')}
+                                for s in _valid_sch_ct[:10]]
+                st.dataframe(_pd_content.DataFrame(_ct_sch_rows), width='stretch', hide_index=True)
+
+            st.markdown("**💡 建议每周创作清单：**")
+            _top_p = [p for p, _ in sorted(_prod_rev.items(), key=lambda x: -x[1]) if p and p != '未知'][:3]
+            _top_s = _valid_sch_ct[:3]
+            for _tp in _top_p:
+                for _ts in _top_s[:2]:
+                    st.markdown(f"- **{_ts} × {_tp}**：小红书选题 + 顾问私聊话术各1条")
+        except Exception as _e_ct:
+            st.caption(f"内容建议加载中：{_e_ct}")
+        st.divider()
 
     # ── 筛选条件 ────────────────────────────
     _default_status = ("pending_review" if _filter_pending
@@ -1774,6 +3395,36 @@ elif page in ("📝 推广素材台", "📝 内容池"):
 # 页面 4：销售作战台
 # ══════════════════════════════════════════════
 elif page in ("💼 顾问作战台", "💼 销售作战台"):
+    # ══ 今日战报 ══════════════════════════════════════════════════════════════
+    try:
+        st.markdown("## 💼 顾问作战台")
+        st.markdown("---")
+        _today_str = datetime.now().strftime('%Y-%m-%d')
+        _orders_7 = list_orders(days=7, limit=500)
+        _today_orders = [o for o in _orders_7 if (o.get('order_date') or '')[:10] == _today_str]
+        _owner_7d = {}
+        for o in _orders_7:
+            _own = ((o.get('sales_owner') or '未分配') + ' ').split()[0]
+            _owner_7d.setdefault(_own, {'cnt':0, 'amt':0})
+            _owner_7d[_own]['cnt'] += 1
+            _owner_7d[_own]['amt'] += o.get('amount') or 0
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("今日成单", len(_today_orders))
+        c2.metric("近7天单量", len(_orders_7))
+        c3.metric("近7天营收", f"元{sum(o.get('amount',0) for o in _orders_7):,.0f}")
+        c4.metric("活跃顾问数", len(_owner_7d))
+
+        st.markdown("### 📊 近7天顾问排行")
+        import pandas as _pd_adv
+        _adv_rows = [{'顾问': k, '单量': v['cnt'], '营收': f"元{int(v['amt']):,}", '客单价': f"元{int(v['amt']/max(v['cnt'],1)):,}"}
+                     for k, v in sorted(_owner_7d.items(), key=lambda x:-x[1]['amt'])]
+        if _adv_rows:
+            st.dataframe(_pd_adv.DataFrame(_adv_rows), width='stretch', hide_index=True)
+        st.divider()
+    except Exception as _e_zb:
+        st.warning(f"今日战报加载中：{_e_zb}")
+
     # ── 数据 ────────────────────────────────
     _approved_all = list_contents(status="approved", limit=200)
     _used_all     = list_contents(status="used", limit=100)
@@ -1790,11 +3441,11 @@ elif page in ("💼 顾问作战台", "💼 销售作战台"):
     )
 
     _sb1, _sb2, _sb3, _sb_sp = st.columns([1.2, 1.2, 1.2, 3])
-    if _sb1.button("📋 查看本周销售建议", type="primary", use_container_width=True):
+    if _sb1.button("📋 查看本周销售建议", type="primary", width='stretch'):
         st.session_state["sales_show_weekly"] = True
-    if _sb2.button("📊 提交客户反馈", use_container_width=True):
+    if _sb2.button("📊 提交客户反馈", width='stretch'):
         st.session_state["sales_show_feedback"] = True
-    if _sb3.button("🔄 刷新素材", use_container_width=True):
+    if _sb3.button("🔄 刷新素材", width='stretch'):
         st.rerun()
 
     st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
@@ -1920,8 +3571,8 @@ elif page in ("💼 顾问作战台", "💼 销售作战台"):
                                 if st.form_submit_button("✅ 提交反馈", type="primary"):
                                     save_content_usage({
                                         "content_id":     _item["id"],
-                                        "used_by":        _u_nm or "顾问",
-                                        "department":     "顾问",
+                                        "used_by":        _u_nm or "销售",
+                                        "department":     "销售部",
                                         "channel":        _u_ch,
                                         "customer_stage": "跟进中",
                                         "result":         _u_res,
@@ -1958,9 +3609,9 @@ elif page in ("💼 顾问作战台", "💼 销售作战台"):
             if st.form_submit_button("📤 提交客户反馈", type="primary"):
                 if _fb_content.strip():
                     save_feedback({
-                        "title":         f"{_fb_name or '顾问'} · {_fb_school or '未知学校'} · {_fb_product}",
-                        "department":    "顾问",
-                        "feedback_type": "顾问异议",
+                        "title":         f"{_fb_name or '销售'} · {_fb_school or '未知学校'} · {_fb_product}",
+                        "department":    "销售部",
+                        "feedback_type": "销售异议",
                         "content":       _fb_content + (f"\n未成交原因：{_fb_reason}" if _fb_reason else ""),
                         "urgency":       "中",
                         "source":        _fb_name or "销售",
@@ -1978,7 +3629,29 @@ elif page in ("💼 顾问作战台", "💼 销售作战台"):
 # ══════════════════════════════════════════════
 elif page == "🗣️ 产品反馈台":
     st.title("🗣️ 产品反馈台")
-    st.caption("后台 / 学管 / 顾问 提交业务反馈，驱动后台资料更新和战略调整")
+    st.caption("产品部 / 学管部 / 销售部 提交业务反馈，驱动产品优化和战略调整")
+
+    # ══ 产品数据快照 ══════════════════════════════════════════════════════════
+    try:
+        st.markdown("### 📦 产品全量数据")
+        _all_st = get_order_stats(days=0)
+        _30_st  = get_order_stats(days=30)
+        _prod_all = dict(_all_st['by_product'])
+        _prod_rev  = dict(_all_st.get('revenue_by_product', []))
+        _prod_30   = dict(_30_st['by_product'])
+
+        import pandas as _pd_pf
+        _pf_rows = []
+        for prd, cnt in sorted(_prod_all.items(), key=lambda x: -x[1]):
+            if not prd or prd == '未知': continue
+            rev = _prod_rev.get(prd, 0)
+            avg = int(rev/max(cnt,1))
+            _pf_rows.append({'产品': prd, '总单量': cnt, '总营收': f"元{int(rev):,}", '均价': f"元{avg:,}", '近30天': _prod_30.get(prd,0)})
+        if _pf_rows:
+            st.dataframe(_pd_pf.DataFrame(_pf_rows), width='stretch', hide_index=True)
+        st.divider()
+    except Exception as _e_pf:
+        st.info(f"产品数据加载中：{_e_pf}")
 
     # ── 新增反馈表单 ──
     with st.expander("➕ 新增反馈", expanded=False):
@@ -2075,6 +3748,65 @@ elif page == "🧭 战略建议台":
     st.title("🧭 战略建议台")
     st.caption("AI 自动生成 + 管理层人工录入的战略洞察与行动建议")
 
+    # ── 数据驱动战略分析 ──
+    try:
+        _s0_strat  = get_order_stats(days=0)
+        _s30_strat = get_order_stats(days=30)
+        _s90_strat = get_order_stats(days=90)
+
+        st.markdown("### 📊 数据支撑的战略分析")
+        c1_st, c2_st, c3_st, c4_st = st.columns(4)
+        _prod_rev_st = dict(_s0_strat.get('revenue_by_product') or [])
+        _top_prod_st = max(_prod_rev_st, key=_prod_rev_st.get) if _prod_rev_st else 'essay'
+        _top_rev_st  = _prod_rev_st.get(_top_prod_st, 0)
+        _tot_rev_st  = max(_s0_strat.get('total_amount', 1), 1)
+        c1_st.metric("营收支柱产品", _top_prod_st[:8],
+                     delta=f"元{int(_top_rev_st/10000)}万 ({int(_top_rev_st/_tot_rev_st*100)}%)")
+        _m30 = _s30_strat.get('total', 0)
+        _m90 = _s90_strat.get('total', 0)
+        _growth_st = (_m30 - _m90 / 3) / max(_m90 / 3, 1)
+        c2_st.metric("月度增长率", f"{_growth_st:+.1%}")
+        _valid_sch_st = [(s, n) for s, n in (_s0_strat.get('by_school') or [])
+                         if s and s not in ('未知', '未知学校', 'None', '未知（学生不愿意说）')]
+        c3_st.metric("TOP学校", _valid_sch_st[0][0][:8] if _valid_sch_st else "-",
+                     delta=f"{_valid_sch_st[0][1]}单" if _valid_sch_st else None)
+        c4_st.metric("全量营收", f"元{int(_tot_rev_st/10000)}万")
+
+        # 产品组合战略分析
+        _prod_all_st = dict(_s0_strat.get('by_product') or [])
+        import pandas as _pd_strat
+        _rows_s = []
+        for _p_s, _rev_s in sorted(_prod_rev_st.items(), key=lambda x: -x[1]):
+            if not _p_s or _p_s == '未知':
+                continue
+            _cnt_s = _prod_all_st.get(_p_s, 0)
+            _rows_s.append({
+                '产品': _p_s,
+                '营收贡献': f"元{int(_rev_s):,}",
+                '营收占比': f"{_rev_s/_tot_rev_st*100:.1f}%",
+                '订单量': _cnt_s,
+                '均价': f"元{int(_rev_s/max(_cnt_s,1)):,}",
+                '战略价值': '⭐核心' if _rev_s/_tot_rev_st > 0.2 else ('✅成长' if _cnt_s > 500 else '🔹补充'),
+            })
+        if _rows_s:
+            st.markdown("**📦 产品战略优先级（按营收贡献）**")
+            st.dataframe(_pd_strat.DataFrame(_rows_s), width='stretch', hide_index=True)
+
+        # 学校战略分析
+        _sch_rows_st = []
+        for _sc_name, _sc_cnt in (_s0_strat.get('by_school') or [])[:15]:
+            if not _sc_name or _sc_name in ('未知', '未知学校', 'None', '未知（学生不愿意说）'):
+                continue
+            _sch_rows_st.append({'学校': _sc_name, '订单量': _sc_cnt,
+                                  '战略等级': '🎯重点' if _sc_cnt > 500 else ('📈培育' if _sc_cnt > 100 else '🔹观察')})
+        if _sch_rows_st:
+            st.markdown("**🏫 学校战略分级**")
+            st.dataframe(_pd_strat.DataFrame(_sch_rows_st[:10]), width='stretch', hide_index=True)
+    except Exception as _e_strat:
+        st.caption(f"战略数据加载中：{_e_strat}")
+
+    st.divider()
+
     # ── 新增建议 ──
     with st.expander("➕ 手动录入战略建议", expanded=False):
         with st.form("suggestion_form"):
@@ -2090,7 +3822,7 @@ elif page == "🧭 战略建议台":
             sg_rec     = st.text_area("建议动作", height=80, placeholder="具体要做什么？谁来做？")
             sc6, sc7   = st.columns(2)
             sg_pri     = sc6.selectbox("优先级", PRIORITY_OPTIONS, index=1)
-            sg_source  = sc7.selectbox("来源", ["管理层","AI生成","顾问反馈","后台","学管","外部调研"])
+            sg_source  = sc7.selectbox("来源", ["管理层","AI生成","销售反馈","产品部","学管部","外部调研"])
             sg_submit  = st.form_submit_button("📩 提交建议", type="primary")
 
             if sg_submit:
@@ -2177,6 +3909,33 @@ elif page == "🧭 战略建议台":
 elif page == "✅ 部门任务台":
     st.title("✅ 部门任务台")
     st.caption("各部门执行任务管理 — 由 AI 自动生成或手动录入")
+
+    # ── 今日数据提醒 ──
+    try:
+        st.markdown("### 📋 今日数据提醒")
+        _s_today_t = get_order_stats(days=1)
+        _s_week_t  = get_order_stats(days=7)
+        _s_month_t = get_order_stats(days=30)
+        _cols_t = st.columns(3)
+        _cols_t[0].metric("今日订单", _s_today_t.get('total', 0),
+                          delta=f"本周累计{_s_week_t.get('total',0)}单")
+        _cols_t[1].metric("今日营收", f"元{int(_s_today_t.get('total_amount',0)):,}")
+        _cols_t[2].metric("本月订单", _s_month_t.get('total', 0),
+                          delta=f"营收元{int(_s_month_t.get('total_amount',0)/10000)}万")
+
+        _suggs_t = list_suggestions(limit=20)
+        if _suggs_t:
+            st.markdown("### 💡 AI建议待办（来自最新运行）")
+            for _sg_t in _suggs_t[:8]:
+                _sg_content = _sg_t.get('recommendation') or _sg_t.get('content') or str(_sg_t)[:200]
+                _sg_type = _sg_t.get('suggestion_type', '建议')
+                _sg_date = (_sg_t.get('created_at') or '')[:10]
+                with st.expander(f"**[{_sg_type}]** — {_sg_date}", expanded=False):
+                    st.markdown(_sg_content[:500] if _sg_content else "（内容待加载）")
+    except Exception as _e_task:
+        st.caption(f"数据加载中：{_e_task}")
+
+    st.divider()
 
     TASK_STATUS_ZH = {"todo":"待执行","doing":"执行中","done":"已完成","blocked":"阻塞","cancelled":"已取消"}
     PRIORITY_ICON  = {"低":"🔵","中":"🟡","高":"🟠","紧急":"🔴"}
@@ -2315,7 +4074,7 @@ elif page == "🤖 自动化工作流":
     st.subheader("▶️ 手动触发工作流")
     col1, col2 = st.columns([1, 3])
     with col1:
-        if st.button("🚀 运行每日工作流", use_container_width=True, type="primary"):
+        if st.button("🚀 运行每日工作流", width='stretch', type="primary"):
             import subprocess, os
             env = os.environ.copy()
             with st.spinner("每日工作流运行中，预计 30-60 秒..."):
@@ -2444,9 +4203,9 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
 
     # ── Hero 操作按钮 ────────────────────────
     _ub1, _ub2, _ub3, _ub_sp = st.columns([1, 1, 1, 3])
-    _do_scan    = _ub1.button("🔍 扫描知识库", use_container_width=True, type="primary")
-    _do_import  = _ub2.button("📥 导入数据", use_container_width=True)
-    _do_signals = _ub3.button("📡 更新市场信号", use_container_width=True)
+    _do_scan    = _ub1.button("🔍 扫描知识库", width='stretch', type="primary")
+    _do_import  = _ub2.button("📥 导入数据", width='stretch')
+    _do_signals = _ub3.button("📡 更新市场信号", width='stretch')
 
     _base_cmd = ["uv", "run", "--with", "sqlalchemy", "--with", "pyyaml",
                  "--with", "pandas", "python", "main.py"]
@@ -2603,7 +4362,7 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
                 try:
                     df_o = pd.read_csv(orders_path, nrows=3)
                     st.caption(f"当前 orders.csv 预览（前3行）：")
-                    st.dataframe(df_o, use_container_width=True, hide_index=True)
+                    st.dataframe(df_o, width='stretch', hide_index=True)
                 except Exception:
                     pass
 
@@ -2622,7 +4381,7 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
                 try:
                     df_l = pd.read_csv(leads_path, nrows=3)
                     st.caption("当前 leads.csv 预览（前3行）：")
-                    st.dataframe(df_l, use_container_width=True, hide_index=True)
+                    st.dataframe(df_l, width='stretch', hide_index=True)
                 except Exception:
                     pass
 
@@ -2730,7 +4489,7 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
         # ── 按钮1：扫描知识库
         st.markdown("#### 1. 扫描知识库资料")
         st.caption("扫描 knowledge_base/ 目录，登记文件信息到数据库。不调用 Claude，速度很快。")
-        if st.button("🔍 扫描知识库资料", key="btn_scan", type="primary", use_container_width=True):
+        if st.button("🔍 扫描知识库资料", key="btn_scan", type="primary", width='stretch'):
             _run_cmd_up("扫描知识库", _base + ["scan-knowledge-base"], "正在扫描文件...")
             st.rerun()
 
@@ -2744,16 +4503,12 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
         docs_no_summary = list_knowledge_docs(has_summary=False)
         st.caption(f"当前待生成摘要文档：{len(docs_no_summary)} 个")
 
-        if st.button("🤖 生成/更新资料摘要", key="btn_summary", use_container_width=True):
+        if st.button("🤖 生成/更新资料摘要", key="btn_summary", width='stretch'):
             if not docs_no_summary:
                 st.info("所有文档已有摘要，无需更新。")
             else:
-                import yaml
-                with open(ROOT / "config.yaml") as f:
-                    _cfg = yaml.safe_load(f)
-                import anthropic as _anthropic
-                _client = _anthropic.Anthropic()
-                _model = _cfg.get("anthropic", {}).get("model", "claude-sonnet-4-6")
+                from services.llm import LLMRouter as _LLMRouter
+                _llm_sum = _LLMRouter()
                 progress = st.progress(0)
                 for i, doc in enumerate(docs_no_summary[:10]):  # 每次最多10个，控制token
                     fp = Path(doc["file_path"]) if doc.get("file_path") else None
@@ -2761,26 +4516,20 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
                         continue
                     try:
                         raw = fp.read_text(encoding="utf-8", errors="ignore")[:3000]  # 最多3000字符
-                        resp = _client.messages.create(
-                            model=_model,
-                            max_tokens=600,
-                            messages=[{
-                                "role": "user",
-                                "content": (
-                                    f"请对以下知识库文档生成简短摘要，用于销售辅助系统。\n\n"
-                                    f"文档类别：{doc['category']}\n文件名：{doc['file_name']}\n\n"
-                                    f"文档内容（节选）：\n{raw}\n\n"
-                                    "请用JSON格式回复，包含以下字段：\n"
-                                    "summary（摘要，150-300字中文）\n"
-                                    "keywords（关键词列表，5-10个）\n"
-                                    "related_products（关联产品ID列表，从以下选择：final_prediction/guaranteed/dissertation/annual_package/dp_premium/ai_learning/regular）\n"
-                                    "related_scenarios（适用销售场景列表，3-5个）\n"
-                                    "只返回JSON，不要其他内容。"
-                                ),
-                            }],
+                        _sum_prompt = (
+                            f"请对以下知识库文档生成简短摘要，用于销售辅助系统。\n\n"
+                            f"文档类别：{doc['category']}\n文件名：{doc['file_name']}\n\n"
+                            f"文档内容（节选）：\n{raw}\n\n"
+                            "请用JSON格式回复，包含以下字段：\n"
+                            "summary（摘要，150-300字中文）\n"
+                            "keywords（关键词列表，5-10个）\n"
+                            "related_products（关联产品ID列表，从以下选择：final_prediction/guaranteed/dissertation/annual_package/dp_premium/ai_learning/regular）\n"
+                            "related_scenarios（适用销售场景列表，3-5个）\n"
+                            "只返回JSON，不要其他内容。"
                         )
+                        _sum_resp = _llm_sum.chat(_sum_prompt, max_tokens=600, task_type="knowledge_summary")
                         import json as _json
-                        raw_resp = resp.content[0].text.strip()
+                        raw_resp = (_sum_resp.text or "").strip()
                         if raw_resp.startswith("```"):
                             raw_resp = raw_resp.split("```")[1]
                             if raw_resp.startswith("json"):
@@ -2808,7 +4557,7 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
             st.warning("⚠️ data/orders.csv 不存在，请先在「数据上传」标签页上传文件。")
         else:
             st.caption(f"文件已就绪：{orders_csv}（{orders_csv.stat().st_size} 字节）")
-        if st.button("📥 导入订单数据", key="btn_orders", type="primary", use_container_width=True,
+        if st.button("📥 导入订单数据", key="btn_orders", type="primary", width='stretch',
                      disabled=not orders_csv.exists()):
             _run_cmd_up("导入订单", _base + ["ingest-orders", "data/orders.csv"], "正在导入订单数据...", timeout=30)
 
@@ -2821,7 +4570,7 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
             st.warning("⚠️ data/leads.csv 不存在，请先在「数据上传」标签页上传文件。")
         else:
             st.caption(f"文件已就绪：{leads_csv}（{leads_csv.stat().st_size} 字节）")
-        if st.button("📥 导入咨询数据", key="btn_leads", type="primary", use_container_width=True,
+        if st.button("📥 导入咨询数据", key="btn_leads", type="primary", width='stretch',
                      disabled=not leads_csv.exists()):
             _run_cmd_up("导入咨询", _base + ["ingest-leads", "data/leads.csv"], "正在导入咨询数据...", timeout=30)
 
@@ -2830,7 +4579,7 @@ elif page in ("📁 数据资料中心", "📁 资料上传中心"):
         # ── 按钮5：更新市场信号
         st.markdown("#### 5. 更新市场信号")
         st.caption("基于 orders/leads 数据用 Python/SQL 统计，生成热门学校/产品/DDL提醒等信号。调用 Claude 仅用于生成建议动作（少量 token）。")
-        if st.button("📡 更新市场信号", key="btn_signals", type="primary", use_container_width=True):
+        if st.button("📡 更新市场信号", key="btn_signals", type="primary", width='stretch'):
             _run_cmd_up(
                 "更新市场信号",
                 ["uv", "run", "--with", "sqlalchemy", "--with", "anthropic",
@@ -2981,7 +4730,7 @@ elif page == "📚 公司资料学习中心":
                             "大小": f"{_f.stat().st_size // 1024} KB",
                         })
         if _file_rows:
-            st.dataframe(pd.DataFrame(_file_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(_file_rows), width='stretch', hide_index=True)
         else:
             st.info("暂无文件，请上传。")
 
@@ -3126,7 +4875,7 @@ elif page == "📚 公司资料学习中心":
                 "可信度": f["confidence"],
                 "更新时间": (f.get("updated_at") or "")[:10],
             } for f in _show_af])
-            st.dataframe(_af_df, use_container_width=True, hide_index=True)
+            st.dataframe(_af_df, width='stretch', hide_index=True)
 
             # 允许撤销确认
             st.markdown("---")
@@ -3168,7 +4917,40 @@ elif page == "🎯 广告预测台":
                 st.error(f"生成失败：{_e}")
 
     if not _preds:
-        st.info("暂无预测数据。请先运行学校评分 + 产品评分，再点击 [生成本周预测]。")
+        st.info("暂无AI预测数据。以下为基于历史数据的学校×产品分析：")
+        try:
+            import pandas as _pd_pred
+            _s0_pred = get_order_stats(days=0)
+            _by_sch_pred  = dict((_s0_pred.get('by_school') or []))
+            _by_prod_pred = dict((_s0_pred.get('by_product') or []))
+            _by_rev_pred  = dict((_s0_pred.get('revenue_by_product') or []))
+            _total_pred   = max(_s0_pred.get('total', 1), 1)
+
+            st.markdown("### 📊 历史数据驱动的广告优先级分析")
+            _pred_c1, _pred_c2 = st.columns(2)
+            with _pred_c1:
+                st.markdown("**🏫 学校投放优先级（订单量）**")
+                _sch_rows_p = [{'学校': s, '历史订单': n,
+                                 '市场份额': f"{n/_total_pred*100:.1f}%",
+                                 '投放建议': '🎯重点' if n > 500 else ('📈培育' if n > 100 else '🔹试投')}
+                               for s, n in sorted(_by_sch_pred.items(), key=lambda x: -x[1])
+                               if s and s not in ('未知', '未知学校', 'None', '未知（学生不愿意说）')][:10]
+                st.dataframe(_pd_pred.DataFrame(_sch_rows_p), width='stretch', hide_index=True)
+            with _pred_c2:
+                st.markdown("**📦 产品投放优先级（营收）**")
+                _total_rev_p = max(_s0_pred.get('total_amount', 1), 1)
+                _prod_rows_p = [{'产品': p,
+                                  '历史订单': _by_prod_pred.get(p, 0),
+                                  '营收': f"元{int(r):,}",
+                                  '营收占比': f"{r/_total_rev_p*100:.1f}%",
+                                  '推广建议': '🎯主推' if r/_total_rev_p > 0.2 else ('📈辅推' if r/_total_rev_p > 0.05 else '🔹测试')}
+                                for p, r in sorted(_by_rev_pred.items(), key=lambda x: -x[1])
+                                if p and p != '未知'][:8]
+                st.dataframe(_pd_pred.DataFrame(_prod_rows_p), width='stretch', hide_index=True)
+
+            st.info("💡 建议：先运行「学校评分」和「产品评分」，再点击上方「生成本周预测」获得AI预测区间。")
+        except Exception as _e_pred:
+            st.caption(f"预测数据加载中：{_e_pred}")
         st.stop()
 
     # ── 机会评分总览 ──
@@ -3181,7 +4963,7 @@ elif page == "🎯 广告预测台":
                 "学校": n, "分数": v["score"], "等级": v["level"],
                 "信号灯": {"green":"🟢","yellow":"🟡","red":"🔴","gray":"⚫"}.get(v["traffic_light"],"⚫"),
             } for n, v in sorted(_opp_school.items(), key=lambda x: -x[1]["score"])[:10]])
-            st.dataframe(_sch_df, use_container_width=True, hide_index=True)
+            st.dataframe(_sch_df, width='stretch', hide_index=True)
         else:
             st.caption("尚无数据，请先运行学校评分")
     with _oc2:
@@ -3192,11 +4974,31 @@ elif page == "🎯 广告预测台":
                 "信号灯": {"green":"🟢","yellow":"🟡","red":"🔴","gray":"⚫"}.get(v["traffic_light"],"⚫"),
                 "风险": "、".join(v.get("risk_flags", [])[:2]),
             } for n, v in sorted(_opp_product.items(), key=lambda x: -x[1]["score"])[:8]])
-            st.dataframe(_pro_df, use_container_width=True, hide_index=True)
+            st.dataframe(_pro_df, width='stretch', hide_index=True)
         else:
             st.caption("尚无数据，请先运行产品分析")
 
     st.divider()
+
+    # ── 预测汇总表 ──
+    if _preds:
+        st.markdown(f"### 📊 本周广告预测（{len(_preds)}条预测）")
+        try:
+            import pandas as _pd_pr2
+            _pred_rows2 = []
+            for _p2 in _preds[:12]:
+                _pred_rows2.append({
+                    '学校': (_p2.get('school') or '')[:12],
+                    '产品': _p2.get('product') or '',
+                    '渠道': _p2.get('channel') or '',
+                    '预计线索': f"{_p2.get('predicted_leads_low',0)}-{_p2.get('predicted_leads_high',0)}条",
+                    '置信度': _p2.get('confidence') or '',
+                    '推广钩子': (_p2.get('hook_theme') or '')[:30],
+                    '预测周': (_p2.get('prediction_week') or '')[:10],
+                })
+            st.dataframe(_pd_pr2.DataFrame(_pred_rows2), width='stretch', hide_index=True)
+        except Exception as _e_pr2:
+            st.caption(f"预测汇总加载中：{_e_pr2}")
 
     # ── 预测列表 ──
     st.subheader("📋 广告预测明细")
@@ -3267,7 +5069,7 @@ elif page == "✅ 执行监督台":
                 "阻碍": _v["blocked"],
                 "完成率": f"{int(_v['completion_rate']*100)}%",
             })
-        st.dataframe(pd.DataFrame(_dept_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(_dept_rows), width='stretch', hide_index=True)
     else:
         st.caption("暂无任务数据")
 
@@ -3291,7 +5093,36 @@ elif page == "✅ 执行监督台":
     _PRIO_COLOR  = {"紧急": "#ef4444", "高": "#f97316", "中": "#3b82f6", "低": "#6b7280"}
 
     if not _all_tasks:
-        st.info("暂无任务，可通过工作流自动生成或手动创建。")
+        st.info("暂无任务记录。以下为当前业务数据快照，供执行参考：")
+        try:
+            import pandas as _pd_exec
+            _s1_exec  = get_order_stats(days=1)
+            _s7_exec  = get_order_stats(days=7)
+            _s30_exec = get_order_stats(days=30)
+            st.markdown("### 📸 业务数据快照")
+            _ec1, _ec2, _ec3, _ec4 = st.columns(4)
+            _ec1.metric("今日订单", _s1_exec.get('total', 0))
+            _ec2.metric("本周订单", _s7_exec.get('total', 0),
+                        delta=f"营收元{int(_s7_exec.get('total_amount',0)/10000)}万")
+            _ec3.metric("本月订单", _s30_exec.get('total', 0))
+            _ec4.metric("本月营收", f"元{int(_s30_exec.get('total_amount',0)/10000)}万")
+
+            # AI建议作为执行参考
+            _suggs_exec = list_suggestions(limit=10)
+            if _suggs_exec:
+                st.markdown("### 💡 AI建议 → 待转化为执行任务")
+                _exec_rows = []
+                for _sg_e in _suggs_exec:
+                    _exec_rows.append({
+                        '建议类型': _sg_e.get('suggestion_type', '-'),
+                        '标题': (_sg_e.get('title') or '')[:40],
+                        '优先级': _sg_e.get('priority', '-'),
+                        '状态': _sg_e.get('status', '-'),
+                    })
+                st.dataframe(_pd_exec.DataFrame(_exec_rows), width='stretch', hide_index=True)
+                st.caption("👆 可在「部门任务台」将以上建议转化为具体执行任务")
+        except Exception as _e_exec:
+            st.caption(f"数据快照加载中：{_e_exec}")
     else:
         for _t in _all_tasks[:100]:
             with st.expander(
@@ -3366,7 +5197,7 @@ elif page == "✅ 执行监督台":
 # ══════════════════════════════════════════════
 # 页面：周复盘台
 # ══════════════════════════════════════════════
-elif page == "🔁 周复盘台":
+elif page in ("🔁 周复盘台", "🔁 每周复盘台"):
     render_hero("🔁 周复盘台", "预测 vs 实际对比 · 执行完成度分析 · 归因与下周重点")
 
     _reviews = list_weekly_reviews(limit=12)
@@ -3389,7 +5220,78 @@ elif page == "🔁 周复盘台":
                 st.error(f"生成失败：{_e}")
 
     if not _reviews:
-        st.info("暂无复盘数据。请先确保有预测和实际订单/咨询数据，再点击生成。")
+        st.info("暂无AI复盘数据。以下为基于订单数据的本周快速复盘：")
+        try:
+            import datetime as _dt_wr
+            import pandas as _pd_wr
+            _today_wr    = _dt_wr.datetime.now()
+            _week_start_wr = (_today_wr - _dt_wr.timedelta(days=_today_wr.weekday())).strftime('%Y-%m-%d')
+            _orders_14_wr = list_orders(days=14, limit=1000)
+            _this_week_wr = [o for o in _orders_14_wr if (o.get('order_date') or '')[:10] >= _week_start_wr]
+            _last_week_wr = [o for o in _orders_14_wr if (o.get('order_date') or '')[:10] < _week_start_wr]
+
+            st.markdown("## 🔁 本周数据复盘")
+            c1_wr, c2_wr, c3_wr, c4_wr = st.columns(4)
+            _tw_rev_wr = sum(o.get('amount', 0) for o in _this_week_wr)
+            _lw_rev_wr = sum(o.get('amount', 0) for o in _last_week_wr)
+            c1_wr.metric("本周订单", len(_this_week_wr), delta=f"vs上周{len(_last_week_wr)}单")
+            c2_wr.metric("本周营收", f"元{int(_tw_rev_wr):,}", delta=f"vs上周元{int(_lw_rev_wr):,}")
+            _tw_owners_wr = set(((o.get('sales_owner') or '') + ' ').split()[0] for o in _this_week_wr if o.get('sales_owner'))
+            c3_wr.metric("本周成单顾问", len(_tw_owners_wr))
+            _tw_prods_wr = {}
+            for _o_wr in _this_week_wr:
+                _p_wr = _o_wr.get('product', '') or ''
+                _tw_prods_wr[_p_wr] = _tw_prods_wr.get(_p_wr, 0) + 1
+            _best_prod_wr = max(_tw_prods_wr, key=_tw_prods_wr.get) if _tw_prods_wr else '-'
+            c4_wr.metric("本周主力产品", (_best_prod_wr or '-')[:8],
+                         delta=f"{_tw_prods_wr.get(_best_prod_wr, 0)}单" if _best_prod_wr != '-' else None)
+
+            # 本周产品明细
+            if _tw_prods_wr:
+                st.markdown("**📦 本周产品分布**")
+                _wr_prod_rows = [{'产品': p, '订单量': c} for p, c in
+                                 sorted(_tw_prods_wr.items(), key=lambda x: -x[1]) if p]
+                st.dataframe(_pd_wr.DataFrame(_wr_prod_rows), width='stretch', hide_index=True)
+
+            # 上周 vs 本周对比
+            if _last_week_wr:
+                _lw_prods_wr = {}
+                for _o_lw in _last_week_wr:
+                    _p_lw = _o_lw.get('product', '') or ''
+                    _lw_prods_wr[_p_lw] = _lw_prods_wr.get(_p_lw, 0) + 1
+                _all_prods_wr = set(list(_tw_prods_wr.keys()) + list(_lw_prods_wr.keys()))
+                _cmp_rows_wr = []
+                for _pp in _all_prods_wr:
+                    if not _pp:
+                        continue
+                    _tw_c = _tw_prods_wr.get(_pp, 0)
+                    _lw_c = _lw_prods_wr.get(_pp, 0)
+                    _cmp_rows_wr.append({'产品': _pp, '本周': _tw_c, '上周': _lw_c,
+                                         '变化': f"{_tw_c - _lw_c:+d}"})
+                if _cmp_rows_wr:
+                    st.markdown("**📊 本周 vs 上周产品对比**")
+                    st.dataframe(_pd_wr.DataFrame(sorted(_cmp_rows_wr, key=lambda x: -x['本周'])),
+                                 width='stretch', hide_index=True)
+        except Exception as _e_wr:
+            st.caption(f"复盘数据加载中：{_e_wr}")
+
+        # 展示 weekly_sales 建议作为复盘参考
+        try:
+            _wr_suggs = list_suggestions(suggestion_type="weekly_sales_suggestion", limit=5)
+            if not _wr_suggs:
+                _wr_suggs = list_suggestions(limit=5)
+            if _wr_suggs:
+                st.divider()
+                st.markdown("### 💡 AI销售建议（作为本周复盘参考）")
+                for _wr_sg in _wr_suggs[:5]:
+                    _wr_txt = (_wr_sg.get('recommendation') or _wr_sg.get('content') or '')[:500]
+                    _wr_tp  = _wr_sg.get('suggestion_type', '建议')
+                    _wr_dt  = (_wr_sg.get('created_at') or '')[:10]
+                    with st.expander(f"**[{_wr_tp}]** — {_wr_dt}", expanded=False):
+                        st.markdown(_wr_txt if _wr_txt else "（内容待加载）")
+        except Exception as _e_wr2:
+            st.caption(f"建议加载中：{_e_wr2}")
+
         st.stop()
 
     # ── 选择复盘周 ──
@@ -3423,7 +5325,7 @@ elif page == "🔁 周复盘台":
             "学校": r["school"], "预测": r["predicted"], "实际": r["actual"],
             "差值": f"{r['actual'] - r['predicted']:+d}",
         } for r in _bd_rows])
-        st.dataframe(_bd_df, use_container_width=True, hide_index=True)
+        st.dataframe(_bd_df, width='stretch', hide_index=True)
 
     # ── 部门完成度 ──
     if _rv.get("dept_completion"):
@@ -3432,7 +5334,7 @@ elif page == "🔁 周复盘台":
             "部门": d, "总任务": v["total"], "已完成": v["done"],
             "完成率": f"{int(v.get('completion_rate', 0)*100)}%",
         } for d, v in _rv["dept_completion"].items()]
-        st.dataframe(pd.DataFrame(_dc_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(_dc_rows), width='stretch', hide_index=True)
 
     st.divider()
 
@@ -3476,7 +5378,7 @@ elif page == "📈 归因分析台":
     with col_run:
         days_lb = st.selectbox("分析区间（天）", [30, 60, 90, 180], index=2)
     with col_period:
-        if st.button("🔄 重新分析", use_container_width=True):
+        if st.button("🔄 重新分析", width='stretch'):
             with st.spinner("归因分析中…"):
                 try:
                     from agents.attribution_analysis_agent import AttributionAnalysisAgent
@@ -3495,17 +5397,171 @@ elif page == "📈 归因分析台":
 
     snap = get_latest_attribution()
 
+    # ── 实时数据归因（直接计算，不依赖snap） ─────────────────────────────
+    st.markdown("### 📊 实时归因分析（直接数据库计算）")
+    _attr_tab1, _attr_tab2, _attr_tab3, _attr_tab4 = st.tabs(
+        ["👤 销售归因", "📦 产品归因", "🏫 学校归因", "📡 渠道归因"]
+    )
+
+    with _attr_tab1:
+        st.markdown("##### 销售顾问业绩归因（近90天）")
+        try:
+            _orders_90 = list_orders(days=90, limit=3000)
+            _owner_stats: dict = {}
+            for _ao in _orders_90:
+                _own = ((_ao.get('sales_owner') or '未分配') + ' ').split()[0]
+                _owner_stats.setdefault(_own, {'cnt': 0, 'amt': 0, 'products': {}})
+                _owner_stats[_own]['cnt'] += 1
+                _owner_stats[_own]['amt'] += _ao.get('amount') or 0
+                _prd = _ao.get('product') or '未知'
+                _owner_stats[_own]['products'][_prd] = _owner_stats[_own]['products'].get(_prd, 0) + 1
+            if _owner_stats:
+                _attr1_rows = []
+                for _ar, (_an, _ad) in enumerate(
+                    sorted(_owner_stats.items(), key=lambda x: -x[1]['amt']), 1
+                ):
+                    _a_avg = int(_ad['amt'] / max(_ad['cnt'], 1))
+                    _a_top_prod = max(_ad['products'], key=lambda p: _ad['products'][p]) if _ad['products'] else '—'
+                    _attr1_rows.append({
+                        '排名': _ar,
+                        '姓名': _an,
+                        '单量': _ad['cnt'],
+                        '营收': f"元{int(_ad['amt']):,}",
+                        '客单价': f"元{_a_avg:,}",
+                        '主力产品': _a_top_prod,
+                    })
+                import pandas as _pd_a1
+                st.dataframe(_pd_a1.DataFrame(_attr1_rows), width='stretch', hide_index=True)
+            else:
+                st.info("近90天暂无销售数据")
+        except Exception as _e_a1:
+            st.info(f"销售数据加载中：{_e_a1}")
+
+    with _attr_tab2:
+        st.markdown("##### 产品归因（全量）")
+        try:
+            _atr_os_all  = get_order_stats(days=0)
+            _atr_os30    = get_order_stats(days=30)
+            _atr_os60    = get_order_stats(days=60)
+            _atr_p_all_cnt = dict(_atr_os_all.get('by_product', []))
+            _atr_p_all_rev = dict(_atr_os_all.get('revenue_by_product', []))
+            _atr_p30_cnt   = dict(_atr_os30.get('by_product', []))
+            _atr_p60_cnt   = dict(_atr_os60.get('by_product', []))
+            _atr_total_rev = sum(_atr_p_all_rev.values()) or 1
+            _a2_rows = []
+            for _ap in sorted(_atr_p_all_cnt.keys(), key=lambda p: -_atr_p_all_rev.get(p, 0)):
+                _ap_cnt  = _atr_p_all_cnt.get(_ap, 0)
+                _ap_rev  = _atr_p_all_rev.get(_ap, 0)
+                _ap_30   = _atr_p30_cnt.get(_ap, 0)
+                _ap_60h  = _atr_p60_cnt.get(_ap, 0) / 2
+                _ap_avg  = int(_ap_rev / max(_ap_cnt, 1))
+                _ap_pct  = round(_ap_rev / _atr_total_rev * 100, 1)
+                _ap_trend = "📈" if _ap_30 > _ap_60h * 1.1 else "📉" if _ap_30 < _ap_60h * 0.9 else "➡️"
+                _a2_rows.append({
+                    '产品': _ap,
+                    '总单量': _ap_cnt,
+                    '总营收': f"元{int(_ap_rev):,}",
+                    '近30天': _ap_30,
+                    '均价': f"元{_ap_avg:,}",
+                    '占总营收%': f"{_ap_pct}%",
+                    '趋势': _ap_trend,
+                })
+            if _a2_rows:
+                import pandas as _pd_a2
+                st.dataframe(_pd_a2.DataFrame(_a2_rows), width='stretch', hide_index=True)
+            else:
+                st.info("暂无产品数据")
+        except Exception as _e_a2:
+            st.info(f"产品数据加载中：{_e_a2}")
+
+    with _attr_tab3:
+        st.markdown("##### 学校归因 — Top15（全量）")
+        try:
+            _atr_sch_all  = get_order_stats(days=0)
+            _atr_sch_cnt  = dict(_atr_sch_all.get('by_school', []))
+            _atr_sch_rev  = dict(_atr_sch_all.get('revenue_by_school', []))
+            _top15_schs = [s for s, _ in _atr_sch_all.get('by_school', []) if _is_valid_school(s)][:15]
+            # 主力产品（从orders计算）
+            _atr_sch_orders = list_orders(days=365, limit=5000)
+            _sch_prods: dict = {}
+            for _sco in _atr_sch_orders:
+                _s = _sco.get('school') or '未知'
+                _p = _sco.get('product') or '未知'
+                _sch_prods.setdefault(_s, {})
+                _sch_prods[_s][_p] = _sch_prods[_s].get(_p, 0) + 1
+            _a3_rows = []
+            for _ri, _sc in enumerate(_top15_schs, 1):
+                _sc_cnt = _atr_sch_cnt.get(_sc, 0)
+                _sc_rev = _atr_sch_rev.get(_sc, 0)
+                _sc_prods = _sch_prods.get(_sc, {})
+                _sc_top_p = max(_sc_prods, key=lambda p: _sc_prods[p]) if _sc_prods else '—'
+                _a3_rows.append({
+                    '排名': _ri,
+                    '学校': _sc,
+                    '总单量': _sc_cnt,
+                    '总营收': f"元{int(_sc_rev):,}",
+                    '主力产品': _sc_top_p,
+                })
+            if _a3_rows:
+                import pandas as _pd_a3
+                st.dataframe(_pd_a3.DataFrame(_a3_rows), width='stretch', hide_index=True)
+            else:
+                st.info("暂无学校数据")
+        except Exception as _e_a3:
+            st.info(f"学校数据加载中：{_e_a3}")
+
+    with _attr_tab4:
+        # Tab4改为：国家/地区分布分析（从orders计算，因为leads渠道字段为空）
+        st.subheader("🌏 国家/地区订单分布")
+        try:
+            _country_stats = get_order_stats(days=0)
+            _country_data = [(c, n) for c, n in _country_stats.get('by_country', [])
+                             if c and c not in ('未知', 'None', None)][:15]
+            if _country_data:
+                import pandas as _pd_ctry
+                _ctry_df = _pd_ctry.DataFrame([
+                    {'国家/地区': c, '订单量': n, '占比': f"{n/max(sum(x[1] for x in _country_data),1)*100:.1f}%"}
+                    for c, n in _country_data
+                ])
+                st.dataframe(_ctry_df, width='stretch', hide_index=True)
+            else:
+                st.info("暂无国家/地区数据")
+
+            # 销售顾问-产品矩阵
+            st.subheader("👤 顾问专长产品分析（近90天）")
+            _orders_90c = list_orders(days=90, limit=3000)
+            _advisor_prod = {}
+            for _o in _orders_90c:
+                _own = ((_o.get('sales_owner') or '未分配') + ' ').split()[0]
+                _prd = _o.get('product') or '未知'
+                _advisor_prod.setdefault(_own, {})
+                _advisor_prod[_own][_prd] = _advisor_prod[_own].get(_prd, 0) + 1
+            if _advisor_prod:
+                _rows_ap = []
+                for _own, _prods in sorted(_advisor_prod.items(), key=lambda x: -sum(x[1].values()))[:10]:
+                    _best_prd = max(_prods, key=_prods.get)
+                    _total = sum(_prods.values())
+                    _rows_ap.append({'顾问': _own, '近90天总单': _total, '主力产品': _best_prd,
+                                     '主力产品单量': _prods[_best_prd],
+                                     '其他产品': '/'.join(f"{p}({n})" for p, n in sorted(_prods.items(), key=lambda x: -x[1]) if p != _best_prd)[:50]})
+                import pandas as _pd_ap
+                st.dataframe(_pd_ap.DataFrame(_rows_ap), width='stretch', hide_index=True)
+        except Exception as _e_tab4:
+            st.warning(f"加载中：{_e_tab4}")
+
+    st.divider()
+
     if not snap:
-        st.info("暂无归因数据，点击「重新分析」生成。")
+        st.info("暂无AI归因快照，点击「重新分析」生成。（实时数据已在上方展示）")
         st.stop()
 
-    st.caption(f"数据区间：{snap['period_start']} → {snap['period_end']}  ·  生成于 {snap['created_at'][:10]}")
+    st.caption(f"AI快照区间：{snap['period_start']} → {snap['period_end']}  ·  生成于 {snap['created_at'][:10]}")
 
     # ── 总览指标 ────────────────────────────────────────────────────
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("分析订单数", snap["order_count"])
     m2.metric("分析线索数", snap["lead_count"])
-    m3.metric("总营收", f"¥{snap['total_revenue']:,.0f}")
+    m3.metric("总营收", f"元{snap['total_revenue']:,.0f}")
     ch_data = snap.get("channel_data") or []
     top_ch = ch_data[0]["channel"] if ch_data else "-"
     m4.metric("最高营收渠道", top_ch)
@@ -3540,7 +5596,7 @@ elif page == "📈 归因分析台":
                 "order_count": "成单数", "revenue": "营收(¥)",
                 "cvr": "转化率(%)", "avg_days_to_close": "平均成交天数"
             })
-            st.dataframe(df_ch, use_container_width=True, hide_index=True)
+            st.dataframe(df_ch, width='stretch', hide_index=True)
 
             # 营收条形图
             try:
@@ -3548,7 +5604,7 @@ elif page == "📈 归因分析台":
                 fig = px.bar(df_ch, x="渠道", y="营收(¥)", color="转化率(%)",
                              color_continuous_scale="RdYlGn",
                              title="各渠道营收 & 转化率")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except ImportError:
                 pass
         else:
@@ -3565,14 +5621,14 @@ elif page == "📈 归因分析台":
                 "gmv": "GMV(¥)", "avg_amount": "客单价(¥)",
                 "top_product": "主力产品", "top_school": "主力学校"
             })
-            st.dataframe(df_adv, use_container_width=True, hide_index=True)
+            st.dataframe(df_adv, width='stretch', hide_index=True)
 
             try:
                 import plotly.express as px
                 fig = px.bar(df_adv, x="顾问", y="GMV(¥)", text="成单数",
                              title="顾问 GMV 对比")
                 fig.update_traces(textposition="outside")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except ImportError:
                 pass
         else:
@@ -3588,7 +5644,7 @@ elif page == "📈 归因分析台":
                 "product": "产品", "school": "学校",
                 "order_count": "成单数", "revenue": "营收(¥)", "avg_amount": "客单价(¥)"
             })
-            st.dataframe(df_ps, use_container_width=True, hide_index=True)
+            st.dataframe(df_ps, width='stretch', hide_index=True)
 
             try:
                 import plotly.express as px
@@ -3597,7 +5653,7 @@ elif page == "📈 归因分析台":
                 )
                 fig = px.imshow(pivot, color_continuous_scale="Blues",
                                 title="产品 × 学校成单热力图", aspect="auto")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except ImportError:
                 pass
         else:
@@ -3614,7 +5670,7 @@ elif page == "📈 归因分析台":
                 "avg_days": "平均天数", "median_days": "中位数天数",
                 "min_days": "最快(天)", "max_days": "最慢(天)"
             })
-            st.dataframe(df_sp, use_container_width=True, hide_index=True)
+            st.dataframe(df_sp, width='stretch', hide_index=True)
 
             try:
                 import plotly.express as px
@@ -3622,7 +5678,7 @@ elif page == "📈 归因分析台":
                              error_y=df_sp["最慢(天)"] - df_sp["平均天数"],
                              title="各顾问平均成交周期（越低越快）",
                              color="平均天数", color_continuous_scale="RdYlGn_r")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except ImportError:
                 pass
         else:
@@ -3634,8 +5690,2412 @@ elif page == "📈 归因分析台":
         for _h in history:
             st.markdown(
                 f"**{_h['snapshot_date']}** — {_h['period_start']}→{_h['period_end']} "
-                f"| {_h['order_count']}单 ¥{_h['total_revenue']:,.0f}"
+                f"| {_h['order_count']}单 元{_h['total_revenue']:,.0f}"
             )
             for _ins in (_h.get("key_insights") or []):
                 st.caption(f"· {_ins}")
             st.divider()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# V11 建设中的模块（stub）
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "📋 学管销售台":
+    st.title("📋 学管销售台")
+    st.caption("渠道线索跟进 · 销售风险预警 · 新品销售准备 — 学管（推广/小红书/垂直号渠道销售）")
+
+    from database.models import Order, Lead, OrderRiskSignal
+    from database.db import get_session
+    from database import list_product_launches, list_deliverables
+    from sqlalchemy import func as _f
+    from datetime import datetime as _dt, timedelta as _td
+
+    now_dt = _dt.now()
+
+    # ── 数据加载 ──────────────────────────────────────────────────────────────
+    with get_session() as _s:
+        # 近30天订单
+        _orders_all = _s.query(Order).filter(
+            Order.created_at >= now_dt - _td(days=30)
+        ).order_by(Order.deadline).all()
+        _orders_dict = [{c.name: getattr(r,c.name) for c in r.__table__.columns} for r in _orders_all]
+
+        # DDL危险订单（7天内到期）
+        _ddl_danger = [o for o in _orders_dict if o.get("deadline") and (
+            isinstance(o["deadline"], _dt) and (o["deadline"] - now_dt).days <= 7
+            or isinstance(o["deadline"], str) and o["deadline"]
+        )]
+
+        # 风险信号
+        _risks = _s.query(OrderRiskSignal).order_by(OrderRiskSignal.created_at.desc()).limit(30).all()
+        _risks_dict = [{c.name: getattr(r,c.name) for c in r.__table__.columns} for r in _risks]
+
+        # 近30天线索（待承接）
+        _leads_pending = _s.query(Lead).filter(
+            Lead.deal_status.in_(["won", "completed"]),
+            Lead.created_at >= now_dt - _td(days=30)
+        ).order_by(Lead.deadline).all()
+        _leads_dict = [{c.name: getattr(r,c.name) for c in r.__table__.columns} for r in _leads_pending]
+
+    # ── 顶部汇总指标 ──────────────────────────────────────────────────────────
+    _ma1,_ma2,_ma3,_ma4,_ma5 = st.columns(5)
+    _ma1.metric("📦 近30天订单", len(_orders_dict))
+    _ma2.metric("🚨 7天内DDL", len(_ddl_danger), delta=f"需紧急跟进" if _ddl_danger else None, delta_color="inverse")
+    _ma3.metric("⚠️ 风险信号", len(_risks_dict))
+    _ma4.metric("✅ 已成交线索（近30天）", len(_leads_dict))
+    # 产品上线交付物问题
+    _pl_all = list_product_launches()
+    _deliv_issues = sum(
+        sum(1 for d in list_deliverables((_lc if isinstance(_lc,dict) else _lc.__dict__).get("id")) if d.get("sales_flagged"))
+        for _lc in _pl_all
+    ) if _pl_all else 0
+    _ma5.metric("🚩 新品销售待确认", _deliv_issues)
+
+    st.divider()
+
+    _tab_ddl, _tab_orders, _tab_risks, _tab_accept, _tab_launch = st.tabs([
+        "🚨 DDL预警", "📦 订单管理", "⚠️ 风险信号", "📲 渠道线索跟进", "🚀 新品销售准备"
+    ])
+
+    # ── Tab1: DDL预警 ─────────────────────────────────────────────────────────
+    with _tab_ddl:
+        if not _ddl_danger:
+            st.success("✅ 近7天无即将到期订单")
+        else:
+            st.error(f"共 {len(_ddl_danger)} 单即将到期，请优先处理！")
+            for _o in sorted(_ddl_danger, key=lambda x: x.get("deadline") or "9999"):
+                _ddl = _o.get("deadline")
+                if isinstance(_ddl, _dt):
+                    _days_left = (_ddl - now_dt).days
+                    _ddl_str = _ddl.strftime("%m-%d %H:%M")
+                elif _ddl:
+                    _days_left = "?"
+                    _ddl_str = str(_ddl)[:16]
+                else:
+                    continue
+                _urgency = "🔴" if isinstance(_days_left,int) and _days_left<=2 else "🟡"
+                _c1,_c2,_c3,_c4 = st.columns([3,2,2,2])
+                _c1.markdown(f"{_urgency} **{_o.get('customer_id','—')}**")
+                _c1.caption(f"{_o.get('product','—')} · {_o.get('service_type','—')}")
+                _c2.markdown(f"DDL: `{_ddl_str}`")
+                _c3.markdown(f"剩余: **{_days_left}天**" if isinstance(_days_left,int) else "剩余:?")
+                _c4.markdown(f"元{int(_o.get('amount') or 0):,}")
+                st.divider()
+
+    # ── Tab2: 订单管理 ────────────────────────────────────────────────────────
+    with _tab_orders:
+        if not _orders_dict:
+            st.info("近30天暂无订单数据")
+        else:
+            # 按产品分组统计
+            _by_prod = {}
+            for _o in _orders_dict:
+                _p = _o.get("product","其他")
+                _by_prod.setdefault(_p, []).append(_o)
+
+            for _prod, _ords in sorted(_by_prod.items(), key=lambda x: -len(x[1])):
+                _total_rev = sum(_o.get("amount") or 0 for _o in _ords)
+                with st.expander(f"**{_prod}** — {len(_ords)}单 · 元{int(_total_rev):,}", expanded=False):
+                    for _o in _ords:
+                        _oc1,_oc2,_oc3,_oc4 = st.columns([3,2,2,2])
+                        _oc1.markdown(f"{_o.get('customer_id','—')}")
+                        _oc1.caption(f"{_o.get('school','')} {_o.get('major','')}")
+                        _ddl_raw = _o.get("deadline")
+                        _oc2.caption(f"DDL: {str(_ddl_raw)[:16] if _ddl_raw else '未设'}")
+                        _oc3.caption(f"负责: {_o.get('sales_owner','—')}")
+                        _oc4.caption(f"元{int(_o.get('amount') or 0):,}")
+
+    # ── Tab3: 风险信号 ────────────────────────────────────────────────────────
+    with _tab_risks:
+        if not _risks_dict:
+            st.success("✅ 暂无风险信号")
+        else:
+            _risk_types = {"ddl_risk":"⏰ DDL风险","missing_material":"📄 材料缺失",
+                          "teacher_unresponsive":"👨‍🏫 老师未响应","client_complaint":"😤 客户投诉",
+                          "quality_risk":"🔍 质量风险"}
+            for _r in _risks_dict:
+                _rtype = _risk_types.get(_r.get("risk_type",""), _r.get("risk_type","⚠️ 风险"))
+                _rc1,_rc2 = st.columns([5,2])
+                with _rc1:
+                    st.markdown(f"**{_rtype}** — 订单 #{_r.get('order_id','?')}")
+                    if _r.get("description"):
+                        st.caption(_r["description"])
+                with _rc2:
+                    st.caption(str(_r.get("created_at",""))[:16])
+                st.divider()
+
+    # ── Tab4: 渠道线索跟进 ────────────────────────────────────────────────────
+    with _tab_accept:
+        st.caption("学管负责承接推广/小红书/垂直号渠道线索，跟进转化，记录成交或流失原因")
+        if not _leads_dict:
+            st.info("近30天暂无已成交线索")
+        else:
+            st.info(f"共 {len(_leads_dict)} 条近30天已成交线索")
+            for _l in _leads_dict:
+                _lc1,_lc2,_lc3,_lc4 = st.columns([3,2,2,2])
+                _lc1.markdown(f"**{_l.get('customer_name','匿名')}**")
+                _lc1.caption(f"{_l.get('product_interest','—')} · {_l.get('school','')}")
+                _lc2.caption(f"渠道: {_l.get('source_channel','—')}")
+                _ddl_l = _l.get("deadline")
+                _lc3.caption(f"DDL: {str(_ddl_l)[:10] if _ddl_l else '未定'}")
+                _lc4.caption(f"元{int(_l.get('quoted_price') or 0):,}")
+                # 销售跟进清单
+                with st.expander("📋 成交记录确认", expanded=False):
+                    _items = [
+                        "客户痛点已准确识别",
+                        "产品已匹配客户需求",
+                        "报价已确认（无超出承诺范围）",
+                        "成交后信息已规范交接给后台",
+                        "客户预期已管理（交付边界已告知）",
+                        "是否有复购 / 转介绍机会",
+                    ]
+                    for _item in _items:
+                        st.checkbox(_item, key=f"accept_{_l.get('id','?')}_{_item[:8]}")
+                st.divider()
+
+    # ── Tab5: 新品销售准备 ────────────────────────────────────────────────────
+    with _tab_launch:
+        st.caption("学管在新品上线前需确认：产品培训已完成 · 渠道话术已就绪 · 哪类线索适合这个产品")
+        if not _pl_all:
+            st.info("暂无在途新产品上线卡")
+        else:
+            for _lc in _pl_all:
+                _ld = _lc if isinstance(_lc, dict) else _lc.__dict__
+                _pname = _ld.get("product_name","—")
+                _delivs = list_deliverables(_ld.get("id"))
+                _xg_delivs = [d for d in _delivs if "学管" in (d.get("owner_dept") or "")]
+                _xg_flagged = [d for d in _xg_delivs if d.get("sales_flagged")]
+                if not _xg_delivs:
+                    continue
+                _done = sum(1 for d in _xg_delivs if d.get("status") in ("已完成","已交付"))
+                _gate2 = _ld.get("gate2_status","not_started")
+                _gate2_icon = {"not_started":"⬜","in_progress":"🟡","passed":"🟢","blocked":"🔴"}.get(_gate2,"⬜")
+                with st.expander(
+                    f"{'🔴' if _xg_flagged else '🟡' if _done<len(_xg_delivs) else '🟢'} "
+                    f"**{_pname}** — 学管销售准备 {_done}/{len(_xg_delivs)} 项完成"
+                    + (f" 🚩{len(_xg_flagged)}项待处理" if _xg_flagged else ""),
+                    expanded=bool(_xg_flagged)
+                ):
+                    st.markdown("**学管需完成的销售准备：**")
+                    for _dv in _xg_delivs:
+                        _dv_s = _dv.get("status","待完成")
+                        _icon = {"待完成":"⬜","进行中":"🟡","已完成":"🟢","有问题":"🔴"}.get(_dv_s,"⬜")
+                        _flag = " 🚩" if _dv.get("sales_flagged") else ""
+                        st.markdown(f"{_icon} {_dv.get('deliverable','—')}{_flag}")
+                        if _dv.get("sales_note"):
+                            st.caption(f"　反馈：{_dv['sales_note']}")
+                    st.caption("关卡进度：" + " → ".join(
+                        f"{'✅' if _ld.get(f'gate{i}_status')=='passed' else '🟡' if _ld.get(f'gate{i}_status')=='in_progress' else '⬜'}关{i}"
+                        for i in range(1,6)
+                    ))
+                    if _ld.get("has_delivery_risk"):
+                        st.error("⚠️ 该产品存在销售风险提示，学管需在推荐前了解不能承诺的内容")
+
+    # ══ 新增：团队全量业绩排行（2023-至今） ════════════════════════════════
+    st.divider()
+    st.markdown("### 🏆 团队全量业绩排行（全量历史）")
+    try:
+        _xg_all_orders = list_orders(days=1460, limit=20000)  # 4年
+        _xg_owner_all: dict = {}
+        for _xo in _xg_all_orders:
+            _xown = ((_xo.get('sales_owner') or '未分配') + ' ').split()[0]
+            _xg_owner_all.setdefault(_xown, {'cnt': 0, 'amt': 0, 'months': set(), 'products': {}})
+            _xg_owner_all[_xown]['cnt'] += 1
+            _xg_owner_all[_xown]['amt'] += _xo.get('amount') or 0
+            _xm = (_xo.get('order_date') or '')[:7]
+            if _xm: _xg_owner_all[_xown]['months'].add(_xm)
+            _xp = _xo.get('product') or '未知'
+            _xg_owner_all[_xown]['products'][_xp] = _xg_owner_all[_xown]['products'].get(_xp, 0) + 1
+        if _xg_owner_all:
+            _xg_all_rows = []
+            for _xr, (_xn, _xd) in enumerate(
+                sorted(_xg_owner_all.items(), key=lambda x: -x[1]['amt']), 1
+            ):
+                _xm_cnt = max(len(_xd['months']), 1)
+                _xavg_m = int(_xd['cnt'] / _xm_cnt)
+                _xtp = max(_xd['products'], key=lambda p: _xd['products'][p]) if _xd['products'] else '—'
+                _xg_all_rows.append({
+                    '排名': _xr,
+                    '姓名': _xn,
+                    '总单量': _xd['cnt'],
+                    '总营收': f"元{int(_xd['amt']):,}",
+                    '月均单量': _xavg_m,
+                    '主力产品': _xtp,
+                })
+            import pandas as _pd_xg
+            st.dataframe(_pd_xg.DataFrame(_xg_all_rows), width='stretch', hide_index=True)
+        else:
+            st.info("暂无历史销售数据")
+    except Exception as _e_xg:
+        st.info(f"历史数据加载中：{_e_xg}")
+
+    # ══ 新增：近30天 vs 上30天对比 ════════════════════════════════════════
+    st.divider()
+    st.markdown("### 📊 近30天 vs 上30天 销售对比")
+    try:
+        import datetime as _xdt
+        _xnow = _xdt.datetime.now()
+        _x30_start = (_xnow - _xdt.timedelta(days=30)).strftime('%Y-%m-%d')
+        _x60_start = (_xnow - _xdt.timedelta(days=60)).strftime('%Y-%m-%d')
+        _x60_end   = (_xnow - _xdt.timedelta(days=31)).strftime('%Y-%m-%d')
+        _xg_60_orders = list_orders(days=60, limit=3000)
+        _xg_this30 = [o for o in _xg_60_orders if (o.get('order_date') or '') >= _x30_start]
+        _xg_last30 = [o for o in _xg_60_orders
+                      if _x60_start <= (o.get('order_date') or '') <= _x60_end]
+        _xg_this_map: dict = {}
+        _xg_last_map: dict = {}
+        for _xo in _xg_this30:
+            _n = ((_xo.get('sales_owner') or '未分配') + ' ').split()[0]
+            _xg_this_map[_n] = _xg_this_map.get(_n, 0) + 1
+        for _xo in _xg_last30:
+            _n = ((_xo.get('sales_owner') or '未分配') + ' ').split()[0]
+            _xg_last_map[_n] = _xg_last_map.get(_n, 0) + 1
+        _all_xg_owners = set(list(_xg_this_map.keys()) + list(_xg_last_map.keys()))
+        if _all_xg_owners:
+            _cmp_rows = []
+            for _xn in sorted(_all_xg_owners, key=lambda n: -_xg_this_map.get(n, 0)):
+                _this = _xg_this_map.get(_xn, 0)
+                _last = _xg_last_map.get(_xn, 0)
+                _diff = _this - _last
+                _pct  = f"+{_diff}" if _diff >= 0 else str(_diff)
+                _rate = f"{_diff / max(_last, 1) * 100:.0f}%" if _last else "—"
+                _cmp_rows.append({
+                    '姓名': _xn,
+                    '近30天单量': _this,
+                    '上30天单量': _last,
+                    '变化': _pct,
+                    '变化率': _rate,
+                })
+            import pandas as _pd_cmp
+            st.dataframe(_pd_cmp.DataFrame(_cmp_rows), width='stretch', hide_index=True)
+        else:
+            st.info("近60天暂无销售数据")
+    except Exception as _e_cmp:
+        st.info(f"对比数据加载中：{_e_cmp}")
+
+elif page == "🚦 产品红绿灯":
+    st.title("🚦 产品红绿灯")
+    st.caption("全产品健康度一览 — 绿色可放大，黄色需观察，红色需干预")
+
+    # ══ 实时产品健康度 ══════════════════════════════════════════════════════
+    try:
+        st.markdown("### ⚡ 实时产品健康度")
+        _s0 = get_order_stats(days=0)
+        _s30 = get_order_stats(days=30)
+        _s90 = get_order_stats(days=90)
+        _pr_all = dict(_s0['by_product'])
+        _pr_30  = dict(_s30['by_product'])
+        _pr_90  = dict(_s90['by_product'])
+        _pr_rev = dict(_s0.get('revenue_by_product', []))
+
+        _product_list = [p for p, _ in _s0['by_product'] if p and p != '未知']
+        _cols_tl = st.columns(min(len(_product_list), 3))
+        for i, prd in enumerate(_product_list[:6]):
+            cnt_30 = _pr_30.get(prd, 0)
+            cnt_90_daily = _pr_90.get(prd, 0) / 3  # 月均
+            status = "🟢 增长" if cnt_30 >= cnt_90_daily * 1.1 else ("🟡 稳定" if cnt_30 >= cnt_90_daily * 0.8 else "🔴 下滑")
+            with _cols_tl[i % 3]:
+                st.metric(f"{status} {prd}", f"{cnt_30}单/月", delta=f"历史月均{int(cnt_90_daily)}单")
+        st.divider()
+    except Exception as _e_tl:
+        st.info(f"产品健康度加载中：{_e_tl}")
+
+    from database import list_product_launches, list_deliverables
+    from database.models import Lead, Order
+    from database.db import get_session
+    from sqlalchemy import func as _func
+
+    launches = list_product_launches()
+
+    if not launches:
+        st.info("暂无产品数据，请在「新产品上线台」创建产品上线卡。")
+    else:
+        def _get_stats(pname):
+            try:
+                with get_session() as s:
+                    leads = s.query(_func.count(Lead.id)).filter(Lead.product_interest.ilike(f"%{pname}%")).scalar() or 0
+                    won = s.query(_func.count(Lead.id)).filter(Lead.product_interest.ilike(f"%{pname}%"), Lead.deal_status.in_(["won", "completed"])).scalar() or 0
+                    orders = s.query(_func.count(Order.id)).filter(Order.product.ilike(f"%{pname}%")).scalar() or 0
+                    revenue = s.query(_func.sum(Order.amount)).filter(Order.product.ilike(f"%{pname}%")).scalar() or 0
+                cvr = round(won/leads*100,1) if leads>0 else 0
+                return leads, won, orders, revenue, cvr
+            except Exception:
+                return 0,0,0,0,0
+
+        def _score(ld, delivs, stats):
+            """综合评分 0-100，决定红绿灯颜色"""
+            score = 100
+            leads, won, orders, revenue, cvr = stats
+            # 关卡阻断 -20
+            for i in range(1,6):
+                if ld.get(f"gate{i}_status") == "blocked": score -= 20
+            # 关卡停滞 -10
+            for i in range(1,6):
+                if ld.get(f"gate{i}_status") == "not_started" and i <= 3: score -= 5
+            # 交付物问题 -5 each
+            flagged = sum(1 for d in delivs if d.get("sales_flagged"))
+            score -= flagged * 5
+            # 管理层叫停 -30
+            if ld.get("mgmt_approval") == "stopped": score -= 30
+            # 管理层推迟 -10
+            if ld.get("mgmt_approval") == "deferred": score -= 10
+            # 异常标记 -10 each
+            if ld.get("has_delivery_risk"): score -= 10
+            if ld.get("sales_continuing_promises") and ld.get("mgmt_approval")=="stopped": score -= 20
+            # 咨询转化率低 -10
+            if leads >= 5 and cvr < 10: score -= 10
+            # 有成交加分
+            if orders >= 3: score += 10
+            if cvr >= 30: score += 10
+            return max(0, min(100, score))
+
+        # 汇总行
+        total = len(launches)
+        green_count = yellow_count = red_count = 0
+
+        product_data = []
+        for lc in launches:
+            ld = lc if isinstance(lc, dict) else lc.__dict__
+            pname = ld.get("product_name","—")
+            delivs = list_deliverables(ld.get("id"))
+            stats = _get_stats(pname)
+            score = _score(ld, delivs, stats)
+            if score >= 70: green_count += 1
+            elif score >= 40: yellow_count += 1
+            else: red_count += 1
+            product_data.append((ld, delivs, stats, score))
+
+        # 汇总指标
+        mc1,mc2,mc3,mc4 = st.columns(4)
+        mc1.metric("🟢 健康（可放大）", green_count)
+        mc2.metric("🟡 观察（需跟进）", yellow_count)
+        mc3.metric("🔴 风险（需干预）", red_count)
+        mc4.metric("📦 产品总数", total)
+        st.divider()
+
+        # 排序：红→黄→绿
+        product_data.sort(key=lambda x: x[3])
+
+        for ld, delivs, stats, score in product_data:
+            pname = ld.get("product_name","—")
+            leads, won, orders, revenue, cvr = stats
+
+            if score >= 70:
+                light = "🟢"; color = "#16a34a"; label = "健康 · 可放大"
+            elif score >= 40:
+                light = "🟡"; color = "#d97706"; label = "观察 · 需跟进"
+            else:
+                light = "🔴"; color = "#dc2626"; label = "风险 · 需干预"
+
+            # 关卡进度条文字
+            gate_str = " → ".join(
+                f"{'✅' if ld.get(f'gate{i}_status')=='passed' else '🔴' if ld.get(f'gate{i}_status')=='blocked' else '🟡' if ld.get(f'gate{i}_status')=='in_progress' else '⬜'}关{i}"
+                for i in range(1,6)
+            )
+
+            with st.container():
+                col_light, col_info, col_metrics = st.columns([1,4,4])
+                with col_light:
+                    st.markdown(
+                        f"<div style='font-size:48px;text-align:center'>{light}</div>"
+                        f"<div style='text-align:center;font-size:12px;color:{color};font-weight:600'>{label}</div>"
+                        f"<div style='text-align:center;font-size:18px;font-weight:700;color:{color}'>{score}分</div>",
+                        unsafe_allow_html=True
+                    )
+                with col_info:
+                    st.markdown(f"**{pname}**")
+                    st.caption(f"负责人：{ld.get('owner','—')} ｜ 审批：{ld.get('mgmt_approval','pending')}")
+                    st.caption(gate_str)
+                    flagged = sum(1 for d in delivs if d.get("sales_flagged"))
+                    if flagged:
+                        st.error(f"🚩 {flagged} 项交付物有问题")
+                    if ld.get("mgmt_approval") == "stopped":
+                        st.error("🛑 管理层已叫停")
+                with col_metrics:
+                    mc1,mc2,mc3 = st.columns(3)
+                    mc1.metric("咨询", leads)
+                    mc2.metric("成交", orders)
+                    mc3.metric("转化", f"{cvr}%")
+                    mc1.metric("收入", f"元{int(revenue):,}" if revenue else "¥0")
+                    mc2.metric("交付物问题", flagged)
+                    mc3.metric("综合评分", f"{score}/100")
+
+                # 处置建议
+                if score < 40:
+                    suggestions = []
+                    for i in range(1,6):
+                        if ld.get(f"gate{i}_status") == "blocked":
+                            suggestions.append(f"关{i}已阻断，需立即解锁")
+                    if flagged: suggestions.append(f"处理 {flagged} 项被标记的交付物")
+                    if ld.get("mgmt_approval")=="stopped": suggestions.append("管理层已叫停，等待新指令")
+                    if leads>=5 and cvr<10: suggestions.append(f"转化率仅{cvr}%，建议复盘话术或定价")
+                    if suggestions:
+                        with st.expander("💡 处置建议", expanded=True):
+                            for s in suggestions:
+                                st.warning(s)
+                elif score < 70:
+                    with st.expander("💡 跟进建议", expanded=False):
+                        if leads < 3: st.info("咨询量偏少，建议加强推广")
+                        if cvr < 20: st.info(f"转化率{cvr}%偏低，建议顾问复盘话术")
+                        not_started = [i for i in range(1,6) if ld.get(f"gate{i}_status")=="not_started"]
+                        if not_started: st.info(f"关{not_started}尚未启动，请推进")
+                st.divider()
+
+elif page == "🔮 增长预测台":
+    import datetime as _fdt_mod
+    import pandas as _pd_fc
+
+    st.markdown("## 🔮 增长预测台")
+    st.caption("基于真实历史数据的预测 · 不是占位页 · 每周自动更新")
+
+    # ── 月度目标设置 ──────────────────────────────────────────
+    _fc_target = st.number_input("📌 月度营收目标（万元）", min_value=50, max_value=5000, value=200, step=10, key="fc_target")
+    _fc_target_rev = _fc_target * 10000
+
+    # ── 基础数据 ──────────────────────────────────────────────
+    try:
+        _fc_now = _fdt_mod.datetime.now()
+        _fc_day = _fc_now.day
+        _fc_month_days = (_fc_now.replace(month=_fc_now.month % 12 + 1, day=1) - _fdt_mod.timedelta(days=1)).day if _fc_now.month < 12 else 31
+
+        # 近365天订单做趋势分析
+        _fc_orders = list_orders(days=730, limit=20000)
+        if not _fc_orders:
+            st.info("no_data：orders 表暂无真实订单，增长预测台不生成收入、订单、产品趋势或行动结论。")
+            st.stop()
+
+        # 按月聚合
+        _fc_monthly_cnt = {}
+        _fc_monthly_rev = {}
+        for _o in _fc_orders:
+            _ym = (_o.get('order_date') or '')[:7]
+            if len(_ym) == 7:
+                _fc_monthly_cnt[_ym] = _fc_monthly_cnt.get(_ym, 0) + 1
+                _fc_monthly_rev[_ym] = _fc_monthly_rev.get(_ym, 0) + (_o.get('amount') or 0)
+
+        _fc_months_sorted = sorted(_fc_monthly_cnt.keys())
+        _fc_last12 = _fc_months_sorted[-13:-1] if len(_fc_months_sorted) > 13 else _fc_months_sorted[:-1]
+
+        # 当月已完成
+        _fc_this_month = _fc_now.strftime('%Y-%m')
+        _fc_this_rev = _fc_monthly_rev.get(_fc_this_month, 0)
+        _fc_this_cnt = _fc_monthly_cnt.get(_fc_this_month, 0)
+
+        # 日均（基于近3个月，排除本月）
+        _fc_recent_rev = [_fc_monthly_rev.get(m, 0) for m in _fc_last12[-3:]]
+        _fc_recent_cnt = [_fc_monthly_cnt.get(m, 0) for m in _fc_last12[-3:]]
+        _fc_avg_monthly_rev = sum(_fc_recent_rev) / max(len(_fc_recent_rev), 1)
+        _fc_avg_monthly_cnt = sum(_fc_recent_cnt) / max(len(_fc_recent_cnt), 1)
+
+        # 本月预测（按当前进度外推）
+        _fc_progress = _fc_day / _fc_month_days
+        _fc_proj_rev = _fc_this_rev / max(_fc_progress, 0.01)
+        _fc_proj_cnt = _fc_this_cnt / max(_fc_progress, 0.01)
+
+        # 下月预测（基于近3月均值，考虑季节性）
+        _fc_next_month_num = (_fc_now.month % 12) + 1
+        _fc_same_month_last_year = f"{_fc_now.year - 1}-{_fc_next_month_num:02d}"
+        _fc_seasonal_factor = _fc_monthly_rev.get(_fc_same_month_last_year, _fc_avg_monthly_rev) / max(_fc_avg_monthly_rev, 1)
+        _fc_next_rev = _fc_avg_monthly_rev * max(min(_fc_seasonal_factor, 1.5), 0.5)
+        _fc_next_cnt = _fc_avg_monthly_cnt * max(min(_fc_seasonal_factor, 1.5), 0.5)
+
+    except Exception as _e_fc_data:
+        st.error(f"数据加载失败：{_e_fc_data}")
+        st.stop()
+
+    # ── 预测结果展示 ───────────────────────────────────────────
+    _fc_c1, _fc_c2, _fc_c3, _fc_c4 = st.columns(4)
+    _fc_c1.metric("本月预计营收", f"元{int(_fc_proj_rev/10000)}万", delta=f"已完成元{int(_fc_this_rev/10000)}万")
+    _fc_c2.metric("本月预计订单", f"{int(_fc_proj_cnt)}单", delta=f"已完成{_fc_this_cnt}单")
+    _fc_c3.metric("下月预测营收", f"元{int(_fc_next_rev/10000)}万", delta=f"季节因子{_fc_seasonal_factor:.1f}x")
+    _fc_c4.metric("下月预测订单", f"{int(_fc_next_cnt)}单")
+
+    # ── 目标差距分析 ──────────────────────────────────────────
+    st.markdown("### 📊 目标达成分析")
+    _fc_gap = _fc_target_rev - _fc_proj_rev
+    _fc_days_left = _fc_month_days - _fc_day
+    _fc_needed_daily = _fc_gap / max(_fc_days_left, 1)
+    _fc_current_daily = _fc_this_rev / max(_fc_day, 1)
+
+    _fc_track_color = "#10b981" if _fc_gap <= 0 else "#ef4444"
+    _fc_track_msg = f"✅ 预计超额完成目标 **元{int(-_fc_gap/10000)}万**" if _fc_gap <= 0 else f"⚠️ 预计缺口 **元{int(_fc_gap/10000)}万**，剩余{_fc_days_left}天需每天新增 元{int(_fc_needed_daily/10000)}万（当前日均 元{int(_fc_current_daily/10000)}万）"
+    st.markdown(f"<div style='background:{_fc_track_color}20;border-left:4px solid {_fc_track_color};padding:10px 16px;border-radius:4px'>{_fc_track_msg}</div>", unsafe_allow_html=True)
+
+    st.progress(min(_fc_this_rev / _fc_target_rev, 1.0), text=f"月度营收目标完成率：{_fc_this_rev/_fc_target_rev:.0%}")
+
+    # 需要补多少线索/成交
+    if _fc_gap > 0:
+        _fc_avg_order_val = _fc_avg_monthly_rev / max(_fc_avg_monthly_cnt, 1)
+        _fc_needed_orders = int(_fc_gap / max(_fc_avg_order_val, 1))
+        _fc_ls30 = get_lead_stats(days=30)
+        _fc_cvr = _fc_ls30.get('conversion_rate')
+
+        _fc_gap_c1, _fc_gap_c2, _fc_gap_c3 = st.columns(3)
+        _fc_gap_c1.metric("还需成交", f"{_fc_needed_orders}单", delta=f"均价元{int(_fc_avg_order_val):,}")
+        if _fc_cvr is not None:
+            _fc_needed_leads = int(_fc_needed_orders / max(_fc_cvr, 0.01))
+            _fc_gap_c2.metric("还需线索", f"{_fc_needed_leads}条", delta=f"按{_fc_cvr:.0%}转化率")
+        else:
+            _fc_gap_c2.metric("还需线索", "no_data", delta="缺少真实转化率")
+        _fc_gap_c3.metric("剩余天数", f"{_fc_days_left}天", delta=f"日均需{int(_fc_needed_orders/max(_fc_days_left,1))}单")
+
+    st.divider()
+
+    # ── 近12个月趋势 ──────────────────────────────────────────
+    st.markdown("### 📈 近12个月历史趋势")
+    if _fc_last12:
+        _fc_trend_df = _pd_fc.DataFrame([
+            {'月份': m, '订单数': _fc_monthly_cnt.get(m,0), '营收(万元)': round(_fc_monthly_rev.get(m,0)/10000, 1),
+             '目标线': round(_fc_target_rev/10000, 1)}
+            for m in _fc_last12
+        ]).set_index('月份')
+        _ftc1, _ftc2 = st.columns(2)
+        _ftc1.bar_chart(_fc_trend_df[['订单数']], height=220)
+        _ftc2.bar_chart(_fc_trend_df[['营收(万元)','目标线']], height=220)
+
+    st.divider()
+
+    # ── 产品爆发/衰退预测 ─────────────────────────────────────
+    st.markdown("### 🚀 产品趋势预测（下月）")
+    try:
+        _fc_s30 = get_order_stats(days=30)
+        _fc_s60 = get_order_stats(days=60)
+        _fc_s90 = get_order_stats(days=90)
+        _fc_prod30 = dict(_fc_s30['by_product'])
+        _fc_prod60 = dict(_fc_s60['by_product'])
+        _fc_prod_rev = dict(_fc_s30.get('revenue_by_product', []))
+
+        _fc_prod_rows = []
+        for _p, _c30 in _fc_prod30.items():
+            if not _p or _p == '未知': continue
+            _c60_avg = _fc_prod60.get(_p, 0) / 2
+            _growth = (_c30 - _c60_avg) / max(_c60_avg, 1) if _c60_avg > 0 else 0
+            _next_pred = int(_c30 * (1 + _growth * 0.5))
+            _status = "🚀 爆发" if _growth > 0.2 else ("📈 增长" if _growth > 0 else ("📉 下滑" if _growth < -0.1 else "→ 平稳"))
+            _fc_prod_rows.append({
+                '产品': PRODUCT_ZH.get(_p, _p),
+                '近30天': _c30,
+                '预测下月': _next_pred,
+                '增长率': f"{_growth:+.0%}",
+                '趋势': _status,
+                '本月营收': f"元{int(_fc_prod_rev.get(_p,0)):,}",
+            })
+
+        _fc_prod_rows.sort(key=lambda x: -_fc_prod30.get(
+            next((k for k, v in PRODUCT_ZH.items() if v == x['产品']), x['产品']), 0))
+
+        if _fc_prod_rows:
+            st.dataframe(_pd_fc.DataFrame(_fc_prod_rows), width='stretch', hide_index=True)
+    except Exception as _e_prod_fc:
+        st.caption(f"产品预测：{_e_prod_fc}")
+
+    st.divider()
+
+    # ── 三层数据融合需求预测信号 ─────────────────────────────────
+    st.markdown("### 🎯 AI需求预测信号（三层数据融合）")
+    st.caption("数据源：学校学术日历 + 课程Assessment + 历史订单画像 + 当前线索热度")
+    try:
+        from database.crud import list_demand_forecast_signals, clear_expired_forecast_signals
+        import datetime as _fc_dt2
+
+        # 筛选器
+        _sig_cols = st.columns(5)
+        _sig_window = _sig_cols[0].selectbox("时间窗口", [7, 14, 30, 60], index=2, key="sig_window")
+        _sig_country = _sig_cols[1].selectbox("国家", ["全部", "AU", "UK", "HK"], key="sig_country")
+        _sig_product = _sig_cols[2].selectbox(
+            "产品",
+            ["全部"] + list(PRODUCT_ZH.keys()),
+            format_func=lambda x: "全部" if x == "全部" else PRODUCT_ZH.get(x, x),
+            key="sig_product",
+        )
+        _sig_conf = _sig_cols[3].selectbox("最低可信度", ["全部", "高(≥0.7)", "中(≥0.4)"], key="sig_conf")
+        _sig_school = _sig_cols[4].text_input("学校关键词", "", key="sig_school_kw")
+
+        _min_conf = 0.0
+        if _sig_conf == "高(≥0.7)": _min_conf = 0.7
+        elif _sig_conf == "中(≥0.4)": _min_conf = 0.4
+
+        _all_signals = list_demand_forecast_signals(
+            time_window=_sig_window,
+            min_confidence=_min_conf,
+            limit=200,
+        )
+
+        # 过滤
+        if _sig_country != "全部":
+            _all_signals = [s for s in _all_signals if s.get("country") == _sig_country]
+        if _sig_product != "全部":
+            _all_signals = [s for s in _all_signals if s.get("product") == _sig_product]
+        if _sig_school:
+            _all_signals = [s for s in _all_signals if _sig_school in (s.get("school") or "")]
+
+        if _all_signals:
+            # 汇总指标
+            _sc1, _sc2, _sc3, _sc4 = st.columns(4)
+            _high_conf = [s for s in _all_signals if s.get("confidence_score", 0) >= 0.7]
+            _schools_covered = len(set(s.get("school") for s in _all_signals))
+            _products_covered = len(set(s.get("product") for s in _all_signals))
+            _sc1.metric("预测信号数", len(_all_signals))
+            _sc2.metric("高置信度信号", len(_high_conf), delta=f"{len(_high_conf)/max(len(_all_signals),1):.0%}")
+            _sc3.metric("覆盖学校", _schools_covered)
+            _sc4.metric("涉及产品", _products_covered)
+
+            # 信号强度最高的Top10展示
+            _top_signals = sorted(_all_signals, key=lambda x: -x.get("signal_strength", 0))[:50]
+
+            import pandas as _pd_sig
+            _sig_rows = []
+            for _s in _top_signals:
+                _conf_label = _s.get("confidence_label") or ("高" if _s.get("confidence_score",0)>=0.7 else "中" if _s.get("confidence_score",0)>=0.4 else "低")
+                _conf_icon = {"高": "🟢", "中": "🟡", "低": "🔴"}.get(_conf_label, "⚪")
+                _sig_rows.append({
+                    "可信度": f"{_conf_icon}{_conf_label}",
+                    "预测产品": PRODUCT_ZH.get(_s.get("product",""), _s.get("product","")),
+                    "学校": (_s.get("school") or "")[:10],
+                    "专业": _s.get("major_category",""),
+                    "时间窗口": f"{_s.get('window_start','')}~{_s.get('window_end','')}",
+                    "信号强度": f"{_s.get('signal_strength',0):.0%}",
+                    "预测依据": (_s.get("forecast_reason") or "")[:60],
+                    "推广动作": (_s.get("promo_action") or "")[:50],
+                    "销售动作": (_s.get("sales_action") or "")[:50],
+                    "触发来源": _s.get("triggered_by",""),
+                })
+            st.dataframe(_pd_sig.DataFrame(_sig_rows), width='stretch', hide_index=True)
+
+            # 展开查看完整预测详情
+            with st.expander("📋 查看完整预测详情（Top10）", expanded=False):
+                for i, _s in enumerate(_top_signals[:10], 1):
+                    _conf = _s.get("confidence_score", 0)
+                    _conf_label = "高" if _conf >= 0.7 else "中" if _conf >= 0.4 else "低"
+                    st.markdown(f"""
+**{i}. {PRODUCT_ZH.get(_s.get('product',''), _s.get('product',''))} — {_s.get('school','')} {_s.get('major_category','')}**
+- 时间窗口：{_s.get('window_start','')} ~ {_s.get('window_end','')}（{_sig_window}天）
+- 信号强度：{_s.get('signal_strength',0):.0%} | 可信度：{_conf_label}（{_conf:.2f}）
+- 预测依据：{_s.get('forecast_reason','') or '—'}
+- 推广动作：{_s.get('promo_action','') or '—'}
+- 销售动作：{_s.get('sales_action','') or '—'}
+- 数据来源：{', '.join(_s.get('data_sources') or [])}
+---""")
+
+            # 高优先级信号一键生成推广任务
+            _top3_high = [s for s in _top_signals if s.get("confidence_score",0) >= 0.6][:3]
+            if _top3_high and st.button("📋 生成Top推广任务", key="fc_signal_task"):
+                for _ts in _top3_high:
+                    _create_task_from_suggestion(
+                        title=f"需求预测推广：{PRODUCT_ZH.get(_ts.get('product',''), _ts.get('product',''))}@{_ts.get('school','')}",
+                        desc=f"预测依据：{_ts.get('forecast_reason','')}\n推广动作：{_ts.get('promo_action','')}\n时间窗口：{_ts.get('window_start','')}~{_ts.get('window_end','')}",
+                        dept="市场部", deadline_days=3,
+                        source_agent="需求预测引擎", priority="高",
+                        product=PRODUCT_ZH.get(_ts.get("product",""), _ts.get("product","")),
+                        channel="小红书",
+                        success_criteria=f"该校该产品线索增加",
+                        review_metric="线索量/成交量对比",
+                    )
+                st.success(f"✅ 已生成 {len(_top3_high)} 个推广任务")
+        else:
+            st.info("暂无预测信号。运行 `python agents/demand_forecast_engine.py --all` 生成。")
+
+        # 数据源健康度
+        with st.expander("📊 三层数据源健康度", expanded=False):
+            from database.crud import list_school_academic_calendars, list_course_assessments_v2, list_major_demand_profiles
+            _t1_cnt = len(list_school_academic_calendars(limit=200))
+            _t2_cnt = len(list_course_assessments_v2(limit=1000))
+            _t3_cnt = len(list_major_demand_profiles(limit=1000))
+            st.markdown(f"""
+| 层级 | 描述 | 记录数 | 状态 |
+|---|---|---|---|
+| 第一层 | 学校学术日历（school_academic_calendars） | **{_t1_cnt}** 条 | {"✅" if _t1_cnt > 10 else "⚠️ 需填充"} |
+| 第二层 | 课程考核数据（course_assessments_v2） | **{_t2_cnt}** 条 | {"✅" if _t2_cnt > 50 else "⚠️ 需填充"} |
+| 第三层 | 专业需求画像（major_demand_profiles） | **{_t3_cnt}** 条（来自CRM历史） | {"✅" if _t3_cnt > 5 else "⚠️ 历史数据不足"} |
+| 预测层 | 需求预测信号（demand_forecast_signals） | **{len(_all_signals)}** 条当前有效 | {"✅" if _all_signals else "需运行预测引擎"} |
+
+⚡ 刷新预测：服务器运行 `python agents/demand_forecast_engine.py --forecast`
+            """)
+    except Exception as _e_sig:
+        st.caption(f"需求预测信号加载中：{_e_sig}")
+
+    st.divider()
+
+    # ── 学校需求期预测（双数据源融合）────────────────────────
+    st.markdown("### 🏫 学校需求期预测")
+    st.caption("数据源 1：内部真实订单历史趋势　|　数据源 2：学校官方/推断学术日历（school_calendar 表）")
+    try:
+        import datetime as _sch_dt
+
+        # ── 数据源1：内部订单历史趋势 ──
+        _fc_sch30 = dict(get_order_stats(days=30)['by_school'])
+        _fc_sch90 = dict(get_order_stats(days=90)['by_school'])
+
+        # ── 数据源2：未来60天的学校日历事件 ──
+        _today_sch = _sch_dt.date.today()
+        _future60   = _today_sch + _sch_dt.timedelta(days=60)
+        _all_cal = list_school_calendar(limit=500)
+        # 过滤出未来60天内的事件
+        _upcoming_events = {}   # school -> list of events
+        for _ev in _all_cal:
+            _ev_start = _ev.get('start_date')
+            if not _ev_start: continue
+            try:
+                _ev_date = _sch_dt.date.fromisoformat(str(_ev_start)[:10])
+            except:
+                continue
+            if _today_sch <= _ev_date <= _future60:
+                _sch_name = _ev.get('school', '')
+                if _sch_name:
+                    _upcoming_events.setdefault(_sch_name, []).append({
+                        'date': _ev_date,
+                        'type': _ev.get('event_type', ''),
+                        'name': _ev.get('event_name', ''),
+                        'source': _ev.get('source', ''),
+                    })
+
+        # ── 融合两个数据源 ──
+        _fc_sch_rows = []
+        _all_schools = set(
+            [s for s in _fc_sch30 if _is_valid_school(s)] +
+            list(_upcoming_events.keys())
+        )
+        for _s in _all_schools:
+            _c30 = _fc_sch30.get(_s, 0)
+            _c90_avg = _fc_sch90.get(_s, 0) / 3
+            _sch_growth = (_c30 - _c90_avg) / max(_c90_avg, 1) if _c90_avg > 0 else 0
+            _events = _upcoming_events.get(_s, [])
+
+            # 事件驱动需求：考试期/提交期 → 强需求信号
+            _event_signal = ""
+            _demand_boost = 0
+            _event_types = [e['type'] for e in _events]
+            if 'exam_period' in _event_types:
+                _event_signal = f"⚠️ 考试期({min(e['date'] for e in _events if e['type']=='exam_period')})"
+                _demand_boost = 30
+            elif 'submission' in _event_types:
+                _event_signal = f"📝 论文/作业提交({min(e['date'] for e in _events if e['type']=='submission')})"
+                _demand_boost = 20
+            elif 'teaching_start' in _event_types:
+                _event_signal = f"🏫 开学({min(e['date'] for e in _events if e['type']=='teaching_start')})"
+                _demand_boost = 10
+
+            # 综合需求评分（历史趋势 + 事件信号）
+            _demand_score = int(min(_c30, 100) * 0.6 + _demand_boost * 0.4)
+            if _sch_growth > 0.2: _demand_score = int(_demand_score * 1.2)
+
+            # 只显示有实际订单或有未来事件的学校
+            if _c30 < 3 and not _events: continue
+
+            _status = (
+                "🔥 强需求" if _demand_boost >= 20 and _sch_growth >= 0 else
+                "📈 上升+事件" if _events and _sch_growth > 0 else
+                "🔥 需求旺" if _sch_growth > 0.2 else
+                "📈 上升" if _sch_growth > 0 else
+                "📅 有节点" if _events else "→ 平稳"
+            )
+
+            _ev_source = ("官方" if any("官方" in e.get('source','') for e in _events) else
+                          "推断" if _events else "—")
+
+            _fc_sch_rows.append({
+                '学校': _s,
+                '近30天订单': _c30,
+                '历史月均': int(_c90_avg),
+                '订单趋势': f"{_sch_growth:+.0%}" if _c90_avg > 0 else "新",
+                '未来60天节点': _event_signal or "—",
+                '节点来源': _ev_source,
+                '综合状态': _status,
+                '建议': '🎯立即跟进' if '强需求' in _status or '上升+事件' in _status else
+                        ('加大投入' if '上升' in _status or '需求旺' in _status else '维持关注'),
+            })
+
+        _fc_sch_rows.sort(key=lambda x: (
+            0 if '强需求' in x['综合状态'] else
+            1 if '上升+事件' in x['综合状态'] else
+            2 if '需求旺' in x['综合状态'] else 3,
+            -x['近30天订单']
+        ))
+
+        if _fc_sch_rows:
+            st.dataframe(_pd_fc.DataFrame(_fc_sch_rows[:20]), width='stretch', hide_index=True)
+
+            # 高优先级学校一键生成任务
+            _hot_schools = [r for r in _fc_sch_rows if '立即跟进' in r['建议']]
+            if _hot_schools:
+                st.warning(f"**⚠️ 以下 {len(_hot_schools)} 所学校有考试/提交节点即将到来，建议立即启动定向推广：**")
+                st.markdown("、".join([r['学校'] for r in _hot_schools[:5]]))
+                if st.button("📋 生成学校定向推广任务", key="fc_sch_task"):
+                    _create_task_from_suggestion(
+                        title=f"学校节点定向推广：{'、'.join([r['学校'] for r in _hot_schools[:3]])}等",
+                        desc=f"以下学校未来60天有考试/提交节点，需要立即启动定向推广：\n" +
+                             "\n".join([f"- {r['学校']}：{r['未来60天节点']}（{r['节点来源']}）" for r in _hot_schools[:5]]),
+                        dept="市场部", deadline_days=3,
+                        source_agent="增长预测台-学校节点", priority="高",
+                        success_criteria="完成定向内容投放",
+                        review_metric="各学校线索数变化"
+                    )
+                    st.success("✅ 已创建任务")
+        else:
+            st.info("暂无足够数据生成学校需求预测")
+
+        # 数据源说明
+        with st.expander("📊 数据源说明", expanded=False):
+            _cal_total = len(_all_cal)
+            _upcoming_total = sum(len(v) for v in _upcoming_events.values())
+            st.markdown(f"""
+**数据源 1 — 内部订单历史**
+- 来源：`orders` 表，近30天 vs 近90天真实成交数据
+- 用途：判断各学校当前订单趋势
+
+**数据源 2 — 学校学术日历**
+- 来源：`school_calendar` 表，共 **{_cal_total}** 条记录
+- 未来60天内有事件的学校：**{len(_upcoming_events)}** 所，共 **{_upcoming_total}** 个节点
+- 事件来源：{", ".join(set(e.get('source','') for ev in _all_cal[:20] for e in [ev] if ev.get('source')))}
+- ⚠️ 当前数据主要为"国家通用推断"，如需更准确的预测，请接入各学校官方学术日历
+            """)
+
+    except Exception as _e_sch_fc:
+        st.caption(f"学校预测：{_e_sch_fc}")
+
+    st.divider()
+
+    # ── 未来30/60天线索预测 ───────────────────────────────────
+    st.markdown("### 📞 线索预测（未来30/60天）")
+    try:
+        _fc_ls30 = get_lead_stats(days=30)
+        _fc_ls60 = get_lead_stats(days=60)
+        _fc_lead_30 = _fc_ls30.get('total', 0)
+        _fc_lead_60 = _fc_ls60.get('total', 0)
+        if _fc_lead_30 <= 0 and _fc_lead_60 <= 0:
+            st.info("no_data：leads 表暂无真实线索，线索预测不生成结论。")
+            raise RuntimeError("leads no_data")
+        _fc_cvr = _fc_ls30.get('conversion_rate')
+        if _fc_cvr is None:
+            st.info("no_data：leads.deal_status 不足以计算真实转化率，线索预测不生成成交/营收结论。")
+            raise RuntimeError("lead conversion no_data")
+        _fc_avg_order_val = _fc_avg_monthly_rev / max(_fc_avg_monthly_cnt, 1)
+
+        # 线索趋势
+        _fc_lead_trend = (_fc_lead_30 - _fc_lead_60 / 2) / max(_fc_lead_60 / 2, 1)
+        _fc_lead_next30 = int(_fc_lead_30 * (1 + _fc_lead_trend * 0.5))
+        _fc_lead_next60 = int(_fc_lead_next30 * 2 * (1 + _fc_lead_trend * 0.3))
+        _fc_deal_next30 = int(_fc_lead_next30 * _fc_cvr)
+        _fc_rev_next30 = int(_fc_deal_next30 * _fc_avg_order_val)
+
+        _fl_c1, _fl_c2, _fl_c3, _fl_c4 = st.columns(4)
+        _fl_c1.metric("近30天实际线索", f"{_fc_lead_30}条", delta=f"转化率{_fc_cvr:.0%}")
+        _fl_c2.metric("预测下30天线索", f"{_fc_lead_next30}条", delta=f"趋势{_fc_lead_trend:+.0%}")
+        _fl_c3.metric("预测下30天成交", f"{_fc_deal_next30}单", delta=f"预计营收元{int(_fc_rev_next30/10000)}万")
+        _fl_c4.metric("预测下60天线索", f"{_fc_lead_next60}条", delta="含季节因子")
+
+        # 结构化预测结论
+        _fc_lead_risk = "🔴 高" if _fc_lead_trend < -0.1 else ("🟡 中" if _fc_lead_trend < 0 else "🟢 低")
+        st.info(f"""
+**预测结论：** 未来30天预计获得 {_fc_lead_next30} 条线索，按当前 {_fc_cvr:.0%} 转化率，预计成交 {_fc_deal_next30} 单，营收 元{int(_fc_rev_next30/10000)}万。
+
+**预测依据：** 近30天线索量 vs 近60天日均趋势，增长率 {_fc_lead_trend:+.0%}
+
+**风险等级：** {_fc_lead_risk} — {'线索量在下降，需要加大推广力度' if _fc_lead_trend < 0 else '线索量稳定增长'}
+
+**建议动作：** {'立即启动线索补充计划，目标7天内新增' + str(int((_fc_avg_monthly_cnt * _fc_cvr - _fc_deal_next30))) + '条高意向线索' if _fc_lead_trend < 0 else '保持当前推广节奏，优化转化率'}
+
+**责任部门：** 市场部（获客）+ 销售部（转化）
+        """)
+    except Exception as _e_lead_fc:
+        st.caption(f"线索预测：{_e_lead_fc}")
+
+    st.divider()
+
+    # ── 渠道增长趋势（来自CRM线索 source_channel 字段）────────
+    st.markdown("### 📡 渠道线索来源分析（CRM真实数据）")
+    try:
+        import pandas as _pd_ch_fc
+        _ch_ls30 = get_lead_stats(days=30)
+        _ch_ls60 = get_lead_stats(days=60)
+        _ch_by30 = dict(_ch_ls30.get("by_channel", []))
+        _ch_by60 = dict(_ch_ls60.get("by_channel", []))
+
+        # 过滤掉空值和未知
+        _ch_by30 = {k: v for k, v in _ch_by30.items() if k and k not in ("未知", "None", "")}
+        _ch_by60 = {k: v for k, v in _ch_by60.items() if k and k not in ("未知", "None", "")}
+
+        if _ch_by30:
+            _total_ch = sum(_ch_by30.values())
+            _ch_rows = []
+            for _chn, _cnt30 in sorted(_ch_by30.items(), key=lambda x: -x[1]):
+                _cnt60_prior = max(_ch_by60.get(_chn, 0) - _cnt30, 0)  # 前30天 = 60天总 - 近30天
+                _trend = (_cnt30 - _cnt60_prior) / max(_cnt60_prior, 1) if _cnt60_prior > 0 else 0
+                _trend_label = "🚀 快速增长" if _trend > 0.2 else ("📈 增长" if _trend > 0 else ("📉 下滑" if _trend < -0.1 else "→ 平稳"))
+                _share = _cnt30 / _total_ch if _total_ch > 0 else 0
+                _ch_rows.append({
+                    "渠道": _chn,
+                    "近30天线索": _cnt30,
+                    "前30天线索": _cnt60_prior,
+                    "环比趋势": f"{_trend:+.0%}" if _cnt60_prior > 0 else "新渠道",
+                    "趋势": _trend_label,
+                    "线索占比": f"{_share:.0%}",
+                })
+            st.dataframe(_pd_ch_fc.DataFrame(_ch_rows), width='stretch', hide_index=True)
+
+            # 结论
+            _best_ch = max(_ch_by30, key=_ch_by30.get)
+            _growing = [r["渠道"] for r in _ch_rows if "增长" in r["趋势"] or "快速" in r["趋势"]]
+            _declining = [r["渠道"] for r in _ch_rows if "下滑" in r["趋势"]]
+            st.success(f"**主力渠道：{_best_ch}**，近30天 {_ch_by30[_best_ch]} 条线索（占比 {_ch_by30[_best_ch]/_total_ch:.0%}）")
+            if _growing:
+                st.info(f"📈 增长中的渠道：{'、'.join(_growing)} — 建议加大投入")
+            if _declining:
+                st.warning(f"📉 下滑渠道：{'、'.join(_declining)} — 建议排查原因或调整策略")
+        else:
+            st.warning("CRM线索数据中暂无渠道来源记录（source_channel 字段为空）。请在录入线索时填写来源渠道。")
+    except Exception as _e_ch_fc:
+        st.error(f"渠道数据加载失败：{_e_ch_fc}")
+
+    if st.button("→ 查看渠道作战台", key="fc_to_channel"):
+        st.session_state["page_jump"] = "📡 渠道作战台"
+
+    st.divider()
+
+    # ── 五部门行动分解 ────────────────────────────────────────
+    st.markdown("### 📋 目标达成行动分解（五部门）")
+
+    # 计算共用变量
+    try:
+        _fc_avg_order_val
+    except NameError:
+        _fc_avg_order_val = _fc_avg_monthly_rev / max(_fc_avg_monthly_cnt, 1)
+    try:
+        _fc_cvr
+    except NameError:
+        _fc_cvr = None
+    try:
+        _fc_gap
+    except NameError:
+        _fc_gap = _fc_target_rev - _fc_proj_rev
+
+    _fc_tab_mkt, _fc_tab_sales, _fc_tab_prod, _fc_tab_delivery, _fc_tab_mgmt = st.tabs(
+        ["📢 推广/市场", "💼 销售/顾问/学管", "📦 产品/后台", "👩‍🏫 交付/老师", "🎯 管理层"]
+    )
+
+    with _fc_tab_mkt:
+        _mkt_actions = []
+        if _fc_gap > 0 and _fc_cvr:
+            _needed_leads = int(_fc_gap / max(_fc_avg_order_val, 1) / max(_fc_cvr, 0.01))
+            _mkt_actions.append(f"本月还需新增线索约 **{_needed_leads}条**（按客单价元{int(_fc_avg_order_val):,}、转化率{_fc_cvr:.0%}计）")
+        elif _fc_gap > 0:
+            _mkt_actions.append("no_data：缺少真实线索转化率，暂不计算需要补充的线索数")
+        if _fc_prod_rows:
+            _hot_prods = [r['产品'] for r in _fc_prod_rows if '爆发' in r['趋势'] or '增长' in r['趋势']][:2]
+            if _hot_prods: _mkt_actions.append(f"重点推广增长产品：{'、'.join(_hot_prods)}")
+        _mkt_actions.extend(["加强旺季学校定向投放", "提升小红书和社群内容发布频次", "启动老客户转介绍激励活动"])
+        for _a in _mkt_actions: st.markdown(f"• {_a}")
+        st.markdown(f"**关联渠道：** 小红书、社群、垂直号")
+        if _fc_prod_rows: st.markdown(f"**关联产品：** {', '.join([r['产品'] for r in _fc_prod_rows[:3]])}")
+        st.markdown("**完成标准：** 线索量达成目标 · 成本/线索 < 200元")
+        st.markdown("**复盘指标：** 线索数、转化率、获客成本")
+        if st.button("📋 生成推广任务", key="fc_mkt_task"):
+            _create_task_from_suggestion(
+                title="本月推广行动计划", desc="\n".join(_mkt_actions),
+                dept="市场部", deadline_days=3, source_agent="增长预测台",
+                priority="高", channel="小红书、社群",
+                success_criteria="线索量达标", review_metric="线索数、获客成本"
+            )
+            st.success("✅ 已创建任务")
+
+    with _fc_tab_sales:
+        _sales_actions = []
+        if _fc_gap > 0:
+            _needed_deals = int(_fc_gap / max(_fc_avg_order_val, 1))
+            _sales_actions.append(f"还需成交 **{_needed_deals}单**（客单价约元{int(_fc_avg_order_val):,}）")
+        _sales_actions.extend(["优先跟进高意向线索（当天回复）", "推进复购：主动联系3个月内老客户", "推动转介绍：每个满意客户争取1个推荐"])
+        if _fc_prod_rows:
+            _top_prod = _fc_prod_rows[0]['产品'] if _fc_prod_rows else ""
+            _sales_actions.append(f"重点推销本周热门产品：{_top_prod}")
+        for _a in _sales_actions: st.markdown(f"• {_a}")
+        st.markdown("**完成标准：** 成交数达标 · 客单价维持均值")
+        st.markdown("**复盘指标：** 成交数、成交额、客单价、转化率")
+        if st.button("📋 生成销售任务", key="fc_sales_task"):
+            _create_task_from_suggestion(
+                title="本月销售冲刺计划", desc="\n".join(_sales_actions),
+                dept="销售部", deadline_days=3, source_agent="增长预测台",
+                priority="高", success_criteria="成交数达标",
+                review_metric="成交数、成交额、转化率"
+            )
+            st.success("✅ 已创建任务")
+
+    with _fc_tab_prod:
+        _prod_fc_actions = ["更新产品目录，确保话术和价格与市场一致"]
+        if _fc_prod_rows:
+            _decline_prods = [r['产品'] for r in _fc_prod_rows if '下滑' in r['趋势']]
+            if _decline_prods: _prod_fc_actions.append(f"排查下滑产品原因：{', '.join(_decline_prods[:2])}")
+        _prod_fc_actions.extend(["准备下季度新产品，评估市场需求", "完善产品说明文档，支持销售话术"])
+        for _a in _prod_fc_actions: st.markdown(f"• {_a}")
+        if st.button("📋 生成产品任务", key="fc_prod_task"):
+            _create_task_from_suggestion(
+                title="本月产品优化计划", desc="\n".join(_prod_fc_actions),
+                dept="产品部", deadline_days=7, source_agent="增长预测台",
+                priority="中", success_criteria="产品目录更新完毕",
+                review_metric="产品满意度、退款率"
+            )
+            st.success("✅ 已创建任务")
+
+    with _fc_tab_delivery:
+        _delivery_actions = []
+        if _fc_proj_cnt > _fc_avg_monthly_cnt * 1.15:
+            _delivery_actions.append(f"⚠️ 预计单量比历史均值高 {int((_fc_proj_cnt/_fc_avg_monthly_cnt-1)*100)}%，需提前储备师资")
+        _delivery_actions.extend(["确认现有老师产能是否有缺口", "建立备用老师资源库", "监控交付质量（好评率/返修率）", "提前识别高风险客户，主动干预"])
+        for _a in _delivery_actions: st.markdown(f"• {_a}")
+        st.markdown("**完成标准：** 无交付超时 · 好评率 > 90%")
+        st.markdown("**复盘指标：** 交付及时率、好评率、返修率")
+        if st.button("📋 生成交付任务", key="fc_delivery_task"):
+            _create_task_from_suggestion(
+                title="本月交付产能保障计划", desc="\n".join(_delivery_actions),
+                dept="交付部", deadline_days=5, source_agent="增长预测台",
+                priority="高" if _fc_proj_cnt > _fc_avg_monthly_cnt * 1.15 else "中",
+                success_criteria="无交付超时", review_metric="交付及时率、好评率"
+            )
+            st.success("✅ 已创建任务")
+
+    with _fc_tab_mgmt:
+        _mgmt_actions = []
+        if _fc_gap > 0:
+            _mgmt_actions.append(f"拍板：是否追加推广预算（缺口元{int(_fc_gap/10000)}万）")
+        if _fc_proj_cnt > _fc_avg_monthly_cnt * 1.2:
+            _mgmt_actions.append("拍板：师资储备预算，应对产能扩张")
+        _mgmt_actions.extend(["审批本月AI建议生成的任务清单", "跟进上周复盘结论落实情况", "确认下月主推产品和渠道方向"])
+        for _a in _mgmt_actions: st.markdown(f"• {_a}")
+        if st.button("📋 生成管理层待办", key="fc_mgmt_task"):
+            _create_task_from_suggestion(
+                title="本月管理层决策清单", desc="\n".join(_mgmt_actions),
+                dept="管理层", deadline_days=2, source_agent="增长预测台",
+                priority="紧急" if _fc_gap > 0 else "高",
+                success_criteria="所有拍板事项确认完毕",
+                review_metric="目标完成率"
+            )
+            st.success("✅ 已创建任务")
+
+
+elif page == "🔧 系统诊断台":
+    st.title("🔧 系统诊断台")
+    st.info("🚧 该模块建设中，敬请期待。")
+
+    # ── Tab1：收入预测 ────────────────────────────────────────────────────────
+    with _ft1:
+        st.markdown("#### 本月 / 下月收入预测")
+        # 按天分组统计近30天收入
+        _daily_rev = collections.defaultdict(float)
+        _daily_count = collections.defaultdict(int)
+        for _o in _f_orders_d:
+            _ca = _o.get("created_at")
+            if not _ca: continue
+            _day = str(_ca)[:10]
+            _daily_rev[_day] += float(_o.get("amount") or 0)
+            _daily_count[_day] += 1
+
+        _days_elapsed = _fn.day
+        _month_orders = [o for o in _f_orders_d if str(o.get("created_at",""))[:7] == _fn.strftime("%Y-%m")]
+        _month_revenue = sum(float(o.get("amount") or 0) for o in _month_orders)
+        _month_count   = len(_month_orders)
+        _daily_avg = _month_revenue / max(_days_elapsed, 1)
+        _days_left = 30 - _days_elapsed
+        _predicted_this_month = _month_revenue + _daily_avg * _days_left
+        _predicted_next_month = _daily_avg * 30  # 基于当月日均
+
+        _pa, _pb, _pc, _pd = st.columns(4)
+        _pa.metric("本月已成交", f"元{int(_month_revenue):,}", f"{_month_count}单")
+        _pb.metric("本月预测完成", f"元{int(_predicted_this_month):,}", f"日均元{int(_daily_avg):,}")
+        _pc.metric("下月预测", f"元{int(_predicted_next_month):,}", "基于当月日均")
+        _pd.metric("月度目标达成预测", f"{min(100,int(_predicted_this_month/300000*100))}%",
+                   "目标¥300,000" if _predicted_this_month < 300000 else "预计达标")
+
+        # 近30天收入趋势图
+        if _daily_rev:
+            import pandas as _fpd
+            _rev_df = _fpd.DataFrame([
+                {"日期": k, "收入": v}
+                for k, v in sorted(_daily_rev.items())[-30:]
+            ]).set_index("日期")
+            st.markdown("**近30天日收入趋势**")
+            st.bar_chart(_rev_df, height=200)
+
+        # 产品收入占比
+        _prod_rev = collections.defaultdict(float)
+        for _o in _f_orders_d:
+            _prod_rev[_o.get("product") or "未分类"] += float(_o.get("amount") or 0)
+        if _prod_rev:
+            st.markdown("**产品收入占比（近90天）**")
+            _pr_cols = st.columns(min(4, len(_prod_rev)))
+            _total_rev = sum(_prod_rev.values())
+            for _pri, (_pname, _prev) in enumerate(sorted(_prod_rev.items(), key=lambda x:-x[1])[:4]):
+                _pr_cols[_pri].metric(_pname[:12], f"元{int(_prev):,}", f"{int(_prev/_total_rev*100)}%")
+
+        # 渠道收入
+        _ch_rev = collections.defaultdict(float)
+        for _o in _f_orders_d:
+            _ch = _o.get("source_channel") or "未知"
+            _ch_rev[_ch] += float(_o.get("amount") or 0)
+        if _ch_rev:
+            st.markdown("**渠道收入分布**")
+            _ch_df_data = {k: v for k,v in sorted(_ch_rev.items(), key=lambda x:-x[1])[:6]}
+            st.bar_chart(_ch_df_data, height=150)
+
+        # ── 全年进度 ──────────────────────────────────────────────────────
+        st.divider()
+        st.markdown("#### 📅 全年进度与预测")
+        try:
+            import datetime as _fdt2
+            _fy_now = _fdt2.datetime.now()
+            _fy_this_year = _fy_now.year
+            _fy_start_this = f"{_fy_this_year}-01-01"
+            _fy_start_last = f"{_fy_this_year - 1}-01-01"
+            _fy_today_str  = _fy_now.strftime('%Y-%m-%d')
+            _fy_today_last = f"{_fy_this_year - 1}-{_fy_now.strftime('%m-%d')}"
+
+            _fy_orders_all = list_orders(days=730, limit=10000)
+            _fy_rev_this = sum(
+                o.get('amount') or 0 for o in _fy_orders_all
+                if _fy_start_this <= (o.get('order_date') or '') <= _fy_today_str
+            )
+            _fy_rev_last = sum(
+                o.get('amount') or 0 for o in _fy_orders_all
+                if _fy_start_last <= (o.get('order_date') or '') <= _fy_today_last
+            )
+            _fy_days_elapsed = _fy_now.timetuple().tm_yday
+            _fy_daily_avg = _fy_rev_this / max(_fy_days_elapsed, 1)
+            _fy_predicted = _fy_daily_avg * 365
+
+            _fp1, _fp2, _fp3, _fp4 = st.columns(4)
+            _fp1.metric("今年截至今日营收", f"元{int(_fy_rev_this):,}")
+            _fp2.metric("去年同期营收", f"元{int(_fy_rev_last):,}",
+                        delta=f"{(_fy_rev_this / max(_fy_rev_last,1) - 1)*100:.1f}%" if _fy_rev_last else None)
+            _fp3.metric("日均营收", f"元{int(_fy_daily_avg):,}", f"已过{_fy_days_elapsed}天")
+            _fp4.metric("全年预测营收", f"元{int(_fy_predicted):,}", "按当前日均×365天")
+
+            # 季节性分析（按月统计历史均值）
+            st.markdown("**季节性分析 — 各月历史均值**")
+            _month_rev_hist: dict = {}
+            for _fyo in _fy_orders_all:
+                _fym = (_fyo.get('order_date') or '')[:7]
+                if not _fym: continue
+                _mkey = _fym[5:7]  # 月份 "01"~"12"
+                _month_rev_hist.setdefault(_mkey, [])
+                _month_rev_hist[_mkey].append(_fyo.get('amount') or 0)
+            if _month_rev_hist:
+                import pandas as _fpd4
+                _season_rows = []
+                for _mnum in sorted(_month_rev_hist.keys()):
+                    _m_vals = _month_rev_hist[_mnum]
+                    _m_avg  = sum(_m_vals) / max(len(_m_vals), 1)
+                    _season_rows.append({'月份': f"{int(_mnum)}月", '历史月均营收': f"元{int(_m_avg):,}", '数据量': len(_m_vals)})
+                _season_df = _fpd4.DataFrame(_season_rows).set_index('月份')
+                st.dataframe(_season_df, width='stretch')
+        except Exception as _e_fy:
+            st.info(f"全年进度计算中：{_e_fy}")
+
+    # ── Tab2：线索预测 ────────────────────────────────────────────────────────
+    with _ft2:
+        st.markdown("#### 未来30天 / 60天线索预测")
+
+        # 按周统计线索
+        _weekly_leads = collections.defaultdict(int)
+        _weekly_won   = collections.defaultdict(int)
+        for _l in _f_leads_d:
+            _ca = _l.get("created_at")
+            if not _ca: continue
+            try:
+                _ld = _ca if isinstance(_ca, _fdt) else _fdt.fromisoformat(str(_ca)[:19])
+                _wk = _ld.strftime("%Y-W%U")
+                _weekly_leads[_wk] += 1
+                if _l.get("deal_status") in ("won", "completed"):
+                    _weekly_won[_wk] += 1
+            except: pass
+
+        _sorted_weeks = sorted(_weekly_leads.keys())[-12:]
+        if _sorted_weeks:
+            _avg_weekly_leads = sum(_weekly_leads[w] for w in _sorted_weeks) / len(_sorted_weeks)
+            _avg_weekly_won   = sum(_weekly_won.get(w,0) for w in _sorted_weeks) / len(_sorted_weeks)
+            _cvr = _avg_weekly_won / max(_avg_weekly_leads, 1)
+
+            _la, _lb, _lc2, _ld2 = st.columns(4)
+            _la.metric("周均咨询", f"{_avg_weekly_leads:.1f}条")
+            _lb.metric("周均成交", f"{_avg_weekly_won:.1f}单")
+            _lc2.metric("平均转化率", f"{_cvr*100:.1f}%")
+            _ld2.metric("30天预测线索", f"{int(_avg_weekly_leads*4.3)}条")
+
+            st.markdown("**近12周线索与成交趋势**")
+            import pandas as _fpd2
+            _lead_df = _fpd2.DataFrame([
+                {"周": w, "咨询": _weekly_leads[w], "成交": _weekly_won.get(w,0)}
+                for w in _sorted_weeks
+            ]).set_index("周")
+            st.line_chart(_lead_df, height=220)
+
+        # 渠道线索分布
+        _ch_leads = collections.defaultdict(int)
+        _ch_won   = collections.defaultdict(int)
+        for _l in _f_leads_d:
+            _ch = _l.get("source_channel") or "未知"
+            _ch_leads[_ch] += 1
+            if _l.get("deal_status") in ("won", "completed"):
+                _ch_won[_ch] += 1
+
+        if _ch_leads:
+            st.markdown("**渠道线索质量对比**")
+            _ch_rows = []
+            for _ch_n, _ch_tot in sorted(_ch_leads.items(), key=lambda x:-x[1]):
+                _ch_cvr = _ch_won.get(_ch_n,0) / max(_ch_tot, 1)
+                _ch_rows.append({"渠道": _ch_n, "线索数": _ch_tot, "成交数": _ch_won.get(_ch_n,0), "转化率": f"{_ch_cvr*100:.1f}%"})
+            import pandas as _fpd3
+            st.dataframe(_fpd3.DataFrame(_ch_rows), hide_index=True, width='stretch')
+
+        # 缺口分析
+        st.markdown("#### 🔍 缺口分析")
+        _target_monthly_orders = 50
+        _current_monthly = len([o for o in _f_orders_d if str(o.get("created_at",""))[:7]==_fn.strftime("%Y-%m")])
+        _predicted_monthly_orders = int(_avg_weekly_leads * 4.3 * _cvr) if _f_has_leads else 0
+        _gap = _target_monthly_orders - _predicted_monthly_orders
+
+        if _gap > 0:
+            st.warning(f"⚠️ 预计月成交 **{_predicted_monthly_orders}单**，目标 **{_target_monthly_orders}单**，缺口 **{_gap}单**")
+            # 找缺口最大渠道
+            _weakest = min(_ch_leads.items(), key=lambda x: _ch_won.get(x[0],0)/max(x[1],1)) if _ch_leads else None
+            if _weakest:
+                _wn = _weakest[0]
+                _wc = _ch_won.get(_wn,0)/max(_ch_leads[_wn],1)
+                st.markdown(f"- **转化率最低渠道：{_wn}**（转化率{_wc*100:.1f}%），是主要缺口来源")
+        else:
+            st.success(f"✅ 预计月成交 **{_predicted_monthly_orders}单**，超出目标 **{_target_monthly_orders}单**")
+
+    # ── Tab3：产品爆发指数 ────────────────────────────────────────────────────
+    with _ft3:
+        st.markdown("#### 产品爆发指数（基于线索成交数据）")
+        st.caption("爆发指数 = 近30天成交量 / 近60天均量 × 100，>120为爆发，<80为衰退")
+
+        _prod_30 = collections.defaultdict(lambda: {"leads":0,"won":0,"revenue":0})
+        _prod_60 = collections.defaultdict(lambda: {"leads":0,"won":0,"revenue":0})
+        _now_30 = _fn - _ftd(days=30)
+        _now_60 = _fn - _ftd(days=60)
+
+        for _l in _f_leads_d:
+            _pn = _l.get("product_interest") or "未分类"
+            try:
+                _ld = _l.get("created_at")
+                _ld = _ld if isinstance(_ld,_fdt) else _fdt.fromisoformat(str(_ld)[:19])
+                if _ld >= _now_30: _prod_30[_pn]["leads"] += 1
+                if _ld >= _now_60: _prod_60[_pn]["leads"] += 1
+                if _l.get("deal_status") in ("won", "completed"):
+                    if _ld >= _now_30: _prod_30[_pn]["won"] += 1
+                    if _ld >= _now_60: _prod_60[_pn]["won"] += 1
+            except: pass
+
+        for _o in _f_orders_d:
+            _pn = _o.get("product") or "未分类"
+            try:
+                _od = _o.get("created_at")
+                _od = _od if isinstance(_od,_fdt) else _fdt.fromisoformat(str(_od)[:19])
+                _amt = float(_o.get("amount") or 0)
+                if _od >= _now_30: _prod_30[_pn]["revenue"] += _amt
+                if _od >= _now_60: _prod_60[_pn]["revenue"] += _amt
+            except: pass
+
+        _all_prods = set(list(_prod_30.keys()) + list(_prod_60.keys()))
+        _prod_explosion = []
+        for _pn in _all_prods:
+            _won30 = _prod_30[_pn]["won"]
+            _won60_avg = _prod_60[_pn]["won"] / 2  # 60天的半均 = 30天等价
+            _idx = int(_won30 / max(_won60_avg, 0.5) * 100)
+            _rev = _prod_30[_pn]["revenue"]
+            _prod_explosion.append({"产品": _pn, "近30天成交": _won30, "爆发指数": _idx, "近30天收入": f"元{int(_rev):,}"})
+
+        _prod_explosion.sort(key=lambda x: -x["爆发指数"])
+
+        if _prod_explosion:
+            import pandas as _fpd4
+            _pe_df = _fpd4.DataFrame(_prod_explosion)
+            st.dataframe(_pe_df, hide_index=True, width='stretch')
+
+            st.markdown("**爆发指数可视化**")
+            _bar_data = {row["产品"][:15]: row["爆发指数"] for row in _prod_explosion[:8]}
+            st.bar_chart(_bar_data, height=200)
+
+            _exploding = [r for r in _prod_explosion if r["爆发指数"] >= 120]
+            _declining = [r for r in _prod_explosion if r["爆发指数"] <= 80]
+            if _exploding:
+                st.success(f"🚀 爆发产品：{', '.join(r['产品'] for r in _exploding[:3])} → 建议加大推广力度")
+            if _declining:
+                st.warning(f"⚠️ 衰退产品：{', '.join(r['产品'] for r in _declining[:3])} → 建议分析原因，调整策略")
+        else:
+            st.info("数据不足，建议上传更多线索和订单数据")
+
+    # ── Tab4：学校节点需求 ────────────────────────────────────────────────────
+    with _ft4:
+        st.markdown("#### 学校时间节点 × 需求预测")
+        _cal = list_school_calendar(limit=50)
+        if not _cal:
+            st.info("暂无学校节点数据，请前往「市场情报台」添加或导入学校节点")
+        else:
+            from datetime import date as _fdate
+            _upcoming = []
+            for _c in _cal:
+                _start = _c.get("start_date")
+                if not _start: continue
+                try:
+                    _sd = _start if isinstance(_start, _fdate) else _fdate.fromisoformat(str(_start)[:10])
+                    _days_to = (_sd - _fn.date()).days
+                    if -7 <= _days_to <= 60:
+                        _upcoming.append({**_c, "_days_to": _days_to})
+                except: pass
+            _upcoming.sort(key=lambda x: x["_days_to"])
+
+            if _upcoming:
+                st.markdown(f"**未来60天内有 {len(_upcoming)} 个关键节点**")
+                for _uc in _upcoming:
+                    _dt = _uc.get("_days_to", 0)
+                    _urgency = "🔴" if _dt <= 7 else "🟡" if _dt <= 21 else "🟢"
+                    _dt_str = f"今天" if _dt == 0 else f"{_dt}天后" if _dt > 0 else f"{abs(_dt)}天前"
+                    _school = _uc.get("school_name","—")
+                    _stage  = _uc.get("current_stage","—")
+                    _prods  = _uc.get("recommended_products","")
+                    st.markdown(f"{_urgency} **{_school}** · {_stage} · {_dt_str}")
+                    if _prods:
+                        st.caption(f"　推荐产品：{_prods}")
+                    st.divider()
+            else:
+                st.info("未来60天内无学校节点记录")
+
+        # 按月需求预测
+        st.markdown("#### 按月历史需求分布")
+        _monthly_leads = collections.defaultdict(int)
+        for _l in _f_leads_d:
+            _ca = _l.get("created_at")
+            if not _ca: continue
+            _m = str(_ca)[:7]
+            _monthly_leads[_m] += 1
+
+        if _monthly_leads:
+            import pandas as _fpd5
+            _ml_df = _fpd5.DataFrame([
+                {"月份": k, "线索数": v}
+                for k, v in sorted(_monthly_leads.items())
+            ]).set_index("月份")
+            st.bar_chart(_ml_df, height=180)
+
+    # ── Tab5：7天行动建议 ─────────────────────────────────────────────────────
+    with _ft5:
+        st.markdown("#### 各部门未来7天行动建议")
+        st.caption("基于当前数据状态生成，不依赖LLM，所有建议有数据依据")
+
+        _dept_actions = {
+            "市场/推广": [],
+            "顾问": [],
+            "学管": [],
+            "后台/产品": [],
+            "管理层": [],
+        }
+
+        # 基于数据生成建议
+        if _f_has_leads:
+            _pending_leads = [l for l in _f_leads_d if l.get("deal_status") not in ("won","lost") and l.get("created_at")]
+            _old_leads = []
+            for _pl2 in _pending_leads:
+                try:
+                    _pld = _pl2.get("created_at")
+                    _pld = _pld if isinstance(_pld,_fdt) else _fdt.fromisoformat(str(_pld)[:19])
+                    if (_fn - _pld).days > 3:
+                        _old_leads.append(_pl2)
+                except: pass
+            if _old_leads:
+                _dept_actions["顾问"].append(f"跟进 **{len(_old_leads)}** 条超3天未成交线索，分析卡点原因")
+                _dept_actions["学管"].append(f"检查 **{len(_old_leads)}** 条线索中学管渠道来源，确认是否已跟进")
+
+        if _ch_leads and _f_has_leads:
+            _best_ch = max(_ch_leads.items(), key=lambda x: _ch_won.get(x[0],0)/max(x[1],1))
+            _dept_actions["市场/推广"].append(f"加大 **{_best_ch[0]}** 渠道投放，该渠道转化率最高")
+
+        _exploding_prods = [r["产品"] for r in _prod_explosion if r["爆发指数"] >= 120] if _prod_explosion else []
+        if _exploding_prods:
+            _dept_actions["市场/推广"].append(f"重点推广 **{', '.join(_exploding_prods[:2])}**，当前爆发趋势明显")
+            _dept_actions["顾问"].append(f"优先推荐 **{_exploding_prods[0]}**，近期成交率上升")
+
+        if _upcoming:
+            _urgent_nodes = [u for u in _upcoming if u.get("_days_to",99) <= 14]
+            if _urgent_nodes:
+                _school_names = list({u.get("school_name","") for u in _urgent_nodes[:3]})
+                _dept_actions["市场/推广"].append(f"**{', '.join(_school_names)}** 进入考季，立即启动押题产品推广")
+                _dept_actions["顾问"].append(f"主动触达 **{', '.join(_school_names)}** 学生，推荐Final精准押题")
+
+        if _stuck_gates:
+            _sg_names = [sg.get("product_name","—") for sg in _stuck_gates[:2]]
+            _dept_actions["管理层"].append(f"解决 **{', '.join(_sg_names)}** 产品关卡阻断，明确推进方向")
+            _dept_actions["后台/产品"].append(f"完成 **{', '.join(_sg_names)}** 被卡关卡的交付物，推动过关")
+
+        if _gap > 0 if '_gap' in dir() else False:
+            _dept_actions["管理层"].append(f"当月成交缺口 **{_gap}单**，需调整资源或策略")
+
+        # 渲染
+        _dept_icons = {"市场/推广":"📣","顾问":"💼","学管":"📋","后台/产品":"📦","管理层":"🏆"}
+        for _dept_name, _actions in _dept_actions.items():
+            _icon = _dept_icons.get(_dept_name,"📌")
+            with st.expander(f"{_icon} **{_dept_name}**（{len(_actions)}条建议）", expanded=len(_actions)>0):
+                if not _actions:
+                    st.markdown("*本周暂无特别行动建议，保持常规执行即可*")
+                for _ai, _action in enumerate(_actions):
+                    st.markdown(f"**{_ai+1}.** {_action}")
+                    _ac1, _ac2 = st.columns([1,3])
+                    if _ac1.button("📋 转为任务", key=f"pred_task_{_dept_name}_{_ai}"):
+                        _tid = _create_task_from_suggestion(
+                            title=_action[:50],
+                            desc=_action,
+                            dept=_dept_name,
+                            source_agent="增长预测台",
+                            deadline_days=7,
+                            priority="高",
+                        )
+                        if _tid:
+                            st.success(f"✅ 已创建任务，前往「部门任务台」查看")
+
+elif page == "🔧 系统诊断台":
+    st.title("🔧 系统诊断台")
+    st.info("🚧 该模块建设中，敬请期待。")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# V11 新产品上线台（修订版 — 按公司真实部门职责与材料清单）
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "🚀 新产品上线台":
+    from database import (
+        save_product_launch, list_product_launches, get_product_launch,
+        update_product_launch, delete_product_launch,
+        migrate_product_launch_v2,
+        save_gate_review, list_gate_reviews,
+        save_dept_feedback, list_dept_feedbacks, update_dept_feedback_status,
+        save_uploaded_file, list_uploaded_files, delete_uploaded_file,
+        save_internal_message, list_internal_messages, migrate_files_messages,
+        save_deliverable, list_deliverables, update_deliverable, delete_deliverable, migrate_deliverables,
+    )
+    import os, time, requests as _requests
+    migrate_product_launch_v2()
+    migrate_files_messages()
+    migrate_deliverables()
+    UPLOAD_DIR = str(ROOT / "uploads")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    WECHAT_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=6fb301ee-26ad-4dc7-bcfb-a97274c7d477"
+
+    def _push_wechat(text: str) -> str:
+        try:
+            r = _requests.post(WECHAT_WEBHOOK, json={"msgtype": "text", "text": {"content": text}}, timeout=5)
+            return "推送成功" if r.json().get("errcode") == 0 else f"失败:{r.json().get('errmsg')}"
+        except Exception as e:
+            return f"推送异常:{e}"
+
+    def _get_product_stats(product_name: str) -> dict:
+        """从 leads / orders 表拉该产品的咨询+成交数据"""
+        from database import get_session
+        from database.models import Lead, Order
+        from sqlalchemy import func
+        try:
+            with get_session() as s:
+                leads_total = s.query(func.count(Lead.id)).filter(
+                    Lead.product_interest.ilike(f"%{product_name}%")
+                ).scalar() or 0
+                leads_won = s.query(func.count(Lead.id)).filter(
+                    Lead.product_interest.ilike(f"%{product_name}%"),
+                    Lead.deal_status.in_(["won", "completed"])
+                ).scalar() or 0
+                orders_count = s.query(func.count(Order.id)).filter(
+                    Order.product.ilike(f"%{product_name}%")
+                ).scalar() or 0
+                revenue = s.query(func.sum(Order.amount)).filter(
+                    Order.product.ilike(f"%{product_name}%")
+                ).scalar() or 0
+            cvr = round(leads_won / leads_total * 100, 1) if leads_total > 0 else 0
+            return {
+                "leads_total": leads_total,
+                "leads_won": leads_won,
+                "orders_count": orders_count,
+                "revenue": revenue,
+                "cvr": cvr,
+            }
+        except Exception:
+            return {"leads_total": 0, "leads_won": 0, "orders_count": 0, "revenue": 0, "cvr": 0}
+
+    def _auto_alert(launches: list) -> list:
+        """检查所有产品，返回需要推送的预警列表"""
+        alerts = []
+        now = datetime.now()
+        for lc in launches:
+            ld = lc if isinstance(lc, dict) else lc.__dict__
+            pname = ld.get("product_name", "未知产品")
+            # 1. 关卡超7天未推进
+            for i in range(1, 6):
+                gf = f"gate{i}_status"
+                if ld.get(gf) == "in_progress":
+                    updated = ld.get("updated_at") or ld.get("created_at")
+                    if updated:
+                        try:
+                            if isinstance(updated, str):
+                                updated = datetime.fromisoformat(updated)
+                            days = (now - updated).days
+                            if days >= 7:
+                                alerts.append(f"⏰ 【{pname}】关{i}已进行中 {days} 天未推进，请检查")
+                        except Exception:
+                            pass
+            # 2. 有交付物被标记问题
+            delivs = list_deliverables(ld.get("id"), None)
+            flagged = [d for d in delivs if d.get("sales_flagged")]
+            if flagged:
+                depts = list({normalize_role(d.get("owner_dept","?")) for d in flagged})
+                alerts.append(f"🚩 【{pname}】{len(flagged)} 项交付物被标记有问题，涉及：{'、'.join(depts)}")
+            # 3. 管理层叫停但顾问仍承诺
+            if ld.get("mgmt_approval") == "stopped" and ld.get("sales_continuing_promises"):
+                alerts.append(f"🛑 【{pname}】管理层已叫停但顾问仍在继续承诺，需立即干预")
+            # 4. 推广已发但推广关未启动
+            if ld.get("has_promo_published") and ld.get("gate3_status") == "not_started":
+                alerts.append(f"🔴 【{pname}】推广素材已发出但推广准备关未启动")
+        return alerts
+
+    st.title("🚀 新产品上线台")
+    st.caption("相互协同 + 相互制约 — 五关把控，部门互评，全程锁态")
+
+    # ── 常量定义（按公司真实文档）────────────────────────────────────────────
+    GATE_NAMES = {
+        1: "产品定义关",
+        2: "交付承接关",
+        3: "推广准备关",
+        4: "销售转化关",
+        5: "复盘优化关",
+    }
+    GATE_PREREQS = {1: [], 2: [1], 3: [2], 4: [3], 5: [4]}
+
+    # 每关每部门需准备/确认的材料清单
+    GATE_CHECKLISTS = {
+        1: {  # 产品定义关
+            "后台/产品": [
+                "产品说明书：适合谁 / 不适合谁",
+                "服务内容与交付物说明",
+                "定价逻辑（基础价/加急费/高难度费）",
+                "承诺边界：能承诺什么 / 不能承诺什么",
+                "风险情况：哪些场景易产生投诉或交付风险",
+                "交付SOP框架（步骤/节点/老师资源要求）",
+            ],
+            "顾问": [
+                "顾问渠道客户高频痛点（final/挂科/AI率/低分/论文/ddl）",
+                "真实购买场景：客户在什么情况下最容易购买",
+                "客户付费理由：结果、安全、省心、速度、老师能力",
+                "客户拒绝原因：贵、不信、怕没效果、觉得自己能做",
+                "老客户需求 / 竞品反馈 / 成交机会",
+            ],
+            "学管": [
+                "学管渠道（推广/小红书/垂直号）客户高频痛点整理",
+                "渠道线索客群特征：和顾问侧客户有何差异",
+                "哪类线索最适合这个产品 / 哪类不适合",
+                "渠道客户常见拒绝理由（与顾问侧不同的部分）",
+                "从学管渠道视角：推广卖点是否打中渠道客户痛点",
+            ],
+        },
+        2: {  # 交付承接关
+            "后台/产品": [
+                "交付SOP文档完整版（步骤/节点/责任人/时间要求）",
+                "老师资源确认（专业范围/接单容量/报价规则）",
+                "质检标准与交付验收标准",
+                "售后处理方式（投诉 / 修改 / 退款边界）书面化",
+                "押题产品完整流程：资料收集→考点确认→老师产出→质检→交付→客户确认",
+            ],
+            "顾问": [
+                "成交后交接清单确认（考试时间/课程资料/客户期待/承诺边界/是否紧急）",
+                "明确哪些情况销售不能承诺给客户",
+                "确认顾问侧成交信息如何规范交接给后台",
+            ],
+            "学管": [
+                "确认成交后学管侧的交接流程（学管渠道客户如何交接）",
+                "明确哪些情况学管渠道不能成交（超出交付范围的需求）",
+                "学管渠道特殊客户需求的上报机制",
+            ],
+        },
+        3: {  # 推广准备关
+            "市场/推广": [
+                "推广素材：朋友圈文案 / 社群内容 / 小红书图文",
+                "客户真实痛点文案（来自顾问+学管反馈）",
+                "推广形式：倒计时 / 风险自测 / 案例故事 / 热点图",
+                "内容覆盖渠道：朋友圈、社群、小红书、私聊",
+                "按时间节点安排（开学季/论文季/Final季/考前）",
+            ],
+            "顾问": [
+                "审核文案：是否符合顾问渠道客户真实痛点",
+                "审核文案：是否有成交钩子",
+                "提供：顾问侧高频成交话术 / 案例素材",
+            ],
+            "学管": [
+                "审核推广内容是否符合小红书/垂直号渠道特性",
+                "确认学管渠道的推广素材和跟进话术",
+                "提供：学管渠道高频客户问题 / 渠道成交案例素材",
+                "审核推广承诺是否超出实际可交付范围",
+            ],
+        },
+        4: {  # 销售转化关
+            "顾问": [
+                "完成产品培训考核（必须能回答以下6项）",
+                "→ 这个产品一句话怎么介绍",
+                "→ 三类适合客户 & 三类不适合客户",
+                "→ 三个核心卖点",
+                "→ 三个不能承诺的点",
+                "→ 客户说贵怎么回答",
+                "→ 客户说考虑一下怎么推进",
+                "统一报价与逼单方式",
+                "顾问渠道小范围试卖：优先老客户 / 有明确需求客户 / ddl紧急客户",
+                "记录：推荐数、意向数、成交数、客户最关心什么",
+            ],
+            "学管": [
+                "完成产品培训考核（同顾问标准，6项必考）",
+                "学管渠道小范围试卖：优先小红书/推广渠道高意向线索",
+                "记录：学管渠道推荐数、意向数、成交数",
+                "学管渠道客户反馈：哪类线索最容易成交 / 最常见异议",
+            ],
+            "市场/推广": [
+                "正式推广启动（多渠道放量）",
+                "更新推广素材（根据顾问+学管反馈优化）",
+            ],
+        },
+        5: {  # 复盘优化关
+            "顾问": [
+                "顾问渠道：推荐数 / 意向数 / 成交数统计",
+                "最有效话术沉淀（顾问渠道）",
+                "卡点原因分析（哪里流失最多）",
+                "哪类客户最适合这个产品",
+            ],
+            "学管": [
+                "学管渠道：推荐数 / 意向数 / 成交数统计",
+                "最有效话术沉淀（学管渠道，与顾问侧对比）",
+                "卡点原因分析（学管渠道客户的流失节点）",
+                "小红书/推广渠道哪类线索质量最高",
+            ],
+            "市场/推广": [
+                "各渠道推广数据（曝光/咨询/转化）",
+                "哪条内容效果最好",
+                "推广建议（继续 / 优化 / 换形式）",
+            ],
+            "后台/产品": [
+                "复盘结论选择：继续放大 / 调整后放大 / 节点性推广 / 暂停",
+                "话术/推广/交付/价格问题汇总",
+                "是否沉淀到知识库",
+            ],
+        },
+    }
+
+    # 每关审核部门
+    GATE_DEPTS = {
+        1: ["产品/后台", "销售/顾问/学管"],
+        2: ["产品/后台", "销售/顾问/学管", "交付/老师"],
+        3: ["推广/市场", "销售/顾问/学管", "产品/后台"],
+        4: ["销售/顾问/学管", "推广/市场"],
+        5: ["产品/后台", "销售/顾问/学管", "推广/市场", "管理层"],
+    }
+
+    STATUS_COLORS = {"not_started": "⬜", "in_progress": "🟡", "passed": "🟢", "blocked": "🔴"}
+    STATUS_LABELS = {"not_started": "未开始", "in_progress": "进行中", "passed": "已通过", "blocked": "已阻断"}
+    APPROVAL_LABELS = {
+        "pending": "⏳ 待审批", "approved": "✅ 已批准",
+        "deferred": "⏸ 已推迟", "adjusted": "🔄 已调整", "stopped": "🛑 已叫停",
+    }
+    REVIEW_CONCLUSION_OPTIONS = ["继续放大", "调整后放大", "节点性推广", "暂停"]
+
+    FEEDBACK_TYPES = [
+        "定价偏高，学员反馈性价比低",
+        "交付质量不稳定，学管投诉多",
+        "推广素材与实际不符，导致退款",
+        "销售话术不统一，顾问各说各的",
+        "报名流程复杂，转化漏斗过长",
+        "师资排期冲突，上课保障困难",
+        "课程设置与目标院校要求脱节",
+        "优惠政策没有同步给学管/顾问",
+        "数据未同步到伙伴CRM，跟进混乱",
+        "复盘缺席，问题未沉淀到知识库",
+    ]
+
+    def _gate_field(n): return f"gate{n}_status"
+
+    def _prereqs_ok(ld, gate_num):
+        return all(ld.get(_gate_field(p)) == "passed" for p in GATE_PREREQS[gate_num])
+
+    def _anomaly_check(ld):
+        alerts = []
+        g = lambda k: ld.get(k, "not_started")
+        if g("gate3_status") == "passed" and g("gate1_status") != "passed":
+            alerts.append("⚠️ 推广关已通过但产品定义关未通过")
+        if g("gate4_status") == "passed" and g("gate2_status") != "passed":
+            alerts.append("⚠️ 销售关已通过但交付承接关未通过")
+        if ld.get("has_active_quotes") and g("gate4_status") == "not_started":
+            alerts.append("🔴 顾问已在报价但销售关未开启")
+        if ld.get("has_promo_published") and g("gate3_status") == "not_started":
+            alerts.append("🔴 推广素材已发出但推广准备关未通过")
+        if ld.get("has_delivery_risk") and g("gate2_status") == "passed":
+            alerts.append("🔴 交付承接关已通过但存在交付风险，需重新确认")
+        if not ld.get("sales_training_done") and g("gate4_status") == "in_progress":
+            alerts.append("⚠️ 销售关进行中但顾问培训未完成")
+        if ld.get("sales_continuing_promises") and ld.get("mgmt_approval") == "stopped":
+            alerts.append("🛑 管理层已叫停但顾问仍在继续承诺")
+        if ld.get("needs_sync_to_xueguan") and not ld.get("sales_training_done"):
+            alerts.append("⚠️ 需同步学管但顾问培训未完成，信息断层风险")
+        if (ld.get("promo_leads_count") or 0) > 0 and g("gate3_status") == "not_started":
+            alerts.append("🔴 已有推广线索进入但推广准备关未启动")
+        if not ld.get("prev_review_done") and g("gate5_status") == "in_progress":
+            alerts.append("⚠️ 复盘关进行中但前一轮复盘未完成")
+        return alerts
+
+    def _lc_dict(lc):
+        return lc if isinstance(lc, dict) else lc.__dict__
+
+    all_launches = list_product_launches()
+
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 看板总览", "🚦 关卡管理", "💬 部门互评", "➕ 新建/编辑", "👔 管理层审批", "📎 资料 & 消息"
+    ])
+
+    # ── Tab 1: 看板总览 ────────────────────────────────────────────────────────
+    with tab1:
+        if not all_launches:
+            st.info("暂无产品上线卡，请在「新建/编辑」标签页创建。")
+        else:
+            # 自动预警检查
+            alerts = _auto_alert(all_launches)
+            if alerts:
+                with st.expander(f"🔔 自动预警（{len(alerts)} 条）", expanded=True):
+                    for a in alerts:
+                        st.warning(a)
+                    if st.button("📲 一键推送预警到企业微信", key="push_all_alerts"):
+                        text = "【新产品上线台 · 自动预警】\n\n" + "\n".join(alerts)
+                        result = _push_wechat(text)
+                        st.success(f"推送结果：{result}")
+                st.divider()
+
+            for lc in all_launches:
+                ld = _lc_dict(lc)
+                lid = ld.get("id")
+                pname = ld.get("product_name","—")
+                anomalies = _anomaly_check(ld)
+                stats = _get_product_stats(pname)
+
+                with st.container():
+                    # 行1：名称 + 关卡 + 审批
+                    col_name, col_gates, col_ap = st.columns([3, 5, 2])
+                    with col_name:
+                        st.markdown(f"**{pname}**")
+                        _owners = [x for x in [ld.get("advisor_owner"), ld.get("xueguan_owner"), ld.get("backend_owner")] if x]
+                        st.caption(f"负责人：{' / '.join(_owners) if _owners else '—'} ｜ 截止：{ld.get('deadline','—')}")
+                    with col_gates:
+                        gcols = st.columns(5)
+                        for i, gc in enumerate(gcols, 1):
+                            sv = ld.get(_gate_field(i), "not_started")
+                            gc.markdown(
+                                f"{STATUS_COLORS.get(sv,'⬜')} **关{i}**<br>"
+                                f"<small>{GATE_NAMES[i]}<br>{STATUS_LABELS.get(sv,'')}</small>",
+                                unsafe_allow_html=True,
+                            )
+                    with col_ap:
+                        ap = ld.get("mgmt_approval", "pending")
+                        st.markdown(APPROVAL_LABELS.get(ap, ap))
+
+                    # 行2：咨询 + 成交数据
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    m1.metric("咨询量", stats["leads_total"])
+                    m2.metric("已成交线索", stats["leads_won"])
+                    m3.metric("转化率", f"{stats['cvr']}%")
+                    m4.metric("订单数", stats["orders_count"])
+                    m5.metric("成交收入", f"元{int(stats['revenue']):,}" if stats["revenue"] else "¥0")
+
+                    if anomalies:
+                        with st.expander(f"⚠️ {len(anomalies)} 条异常", expanded=False):
+                            for a in anomalies:
+                                st.error(a)
+                    st.divider()
+
+    # ── Tab 2: 关卡管理 ────────────────────────────────────────────────────────
+    with tab2:
+        if not all_launches:
+            st.info("请先创建产品上线卡。")
+        else:
+            names2 = [_lc_dict(lc).get("product_name","—") for lc in all_launches]
+            sel2 = st.selectbox("选择产品", names2, key="gate_sel")
+            sel_lc = next((lc for lc in all_launches if _lc_dict(lc).get("product_name") == sel2), None)
+            if sel_lc:
+                ld = _lc_dict(sel_lc)
+                lid = ld.get("id")
+
+                for gate_num in range(1, 6):
+                    gname = GATE_NAMES[gate_num]
+                    cur = ld.get(_gate_field(gate_num), "not_started")
+                    prereqs_ok = _prereqs_ok(ld, gate_num)
+                    reviews = list_gate_reviews(lid, gate_num)
+
+                    with st.expander(
+                        f"{STATUS_COLORS.get(cur,'⬜')} 关{gate_num}：{gname} — {STATUS_LABELS.get(cur,'')}",
+                        expanded=(cur == "in_progress"),
+                    ):
+                        # 前置锁定提示
+                        if not prereqs_ok and cur == "not_started":
+                            prereq_str = "、".join(GATE_NAMES[p] for p in GATE_PREREQS[gate_num])
+                            st.warning(f"🔒 前置条件未满足：{prereq_str} 须先通过")
+                        else:
+                            new_status = st.selectbox(
+                                "更新关卡状态",
+                                ["not_started","in_progress","passed","blocked"],
+                                index=["not_started","in_progress","passed","blocked"].index(cur),
+                                format_func=lambda x: STATUS_LABELS.get(x, x),
+                                key=f"gstatus_{lid}_{gate_num}",
+                            )
+                            if st.button(f"保存关{gate_num}状态", key=f"gsave_{lid}_{gate_num}"):
+                                update_product_launch(lid, {_gate_field(gate_num): new_status})
+                                st.success("已保存")
+                                st.rerun()
+
+                        # 各部门材料清单
+                        st.markdown("---")
+                        st.markdown(f"**📋 本关各部门材料 & 职责清单**")
+                        for dept, items in GATE_CHECKLISTS[gate_num].items():
+                            st.markdown(f"**{dept}**")
+                            for item in items:
+                                prefix = "&nbsp;&nbsp;&nbsp;&nbsp;" if item.startswith("→") else "- "
+                                st.markdown(f"{prefix}{item}", unsafe_allow_html=True)
+
+                        # ── 交付物：按部门分块展示 ──────────────────────────
+                        st.markdown("---")
+                        st.markdown("**📦 各部门交付物 & 质量标准**")
+
+                        # 如果该关卡还没有任何交付物，自动从 GATE_CHECKLISTS 预初始化
+                        delivs_all = list_deliverables(lid, gate_num)
+                        if not delivs_all and cur in ("in_progress", "passed"):
+                            for dept_name, items in GATE_CHECKLISTS[gate_num].items():
+                                for item in items:
+                                    if not item.startswith("→"):
+                                        save_deliverable({
+                                            "launch_id": lid,
+                                            "gate_num": gate_num,
+                                            "deliverable": item,
+                                            "quality_std": "",
+                                            "deadline": "",
+                                            "owner_dept": dept_name,
+                                            "status": "待完成",
+                                        })
+                            delivs_all = list_deliverables(lid, gate_num)
+
+                        # 按部门分组
+                        dept_order = list(GATE_CHECKLISTS[gate_num].keys())
+                        other_depts = list({d.get("owner_dept") for d in delivs_all if d.get("owner_dept") not in dept_order})
+                        all_depts_ordered = dept_order + other_depts
+
+                        STATUS_ICON2 = {"待完成":"⬜","进行中":"🟡","已完成":"🟢","有问题":"🔴","待定义":"⬜","已定义":"🟡","已交付":"🟢"}
+                        STATUS_OPTS2 = ["待完成","进行中","已完成","有问题"]
+
+                        any_flagged = [d for d in delivs_all if d.get("sales_flagged")]
+                        if any_flagged:
+                            st.error(f"🚩 {len(any_flagged)} 项被顾问/销售标记有问题，请相关部门处理")
+
+                        for dept_name in all_depts_ordered:
+                            dept_delivs = [d for d in delivs_all if d.get("owner_dept") == dept_name]
+                            if not dept_delivs:
+                                continue
+                            done = sum(1 for d in dept_delivs if d.get("status") in ("已完成","已交付"))
+                            flagged_dept = sum(1 for d in dept_delivs if d.get("sales_flagged"))
+                            dept_label = f"**{dept_name}** — {done}/{len(dept_delivs)} 完成"
+                            if flagged_dept:
+                                dept_label += f" 🚩{flagged_dept}项问题"
+                            st.markdown(dept_label)
+
+                            for dv in dept_delivs:
+                                dv_id = dv.get("id")
+                                dv_status = dv.get("status","待完成")
+                                sicon = STATUS_ICON2.get(dv_status,"⬜")
+                                flag_tag = " 🚩" if dv.get("sales_flagged") else ""
+                                with st.expander(f"{sicon} {dv.get('deliverable','—')}{flag_tag}", expanded=bool(dv.get("sales_flagged"))):
+                                    # 负责部门：更新状态 + 质量标准
+                                    row1c1, row1c2 = st.columns([3,2])
+                                    with row1c1:
+                                        if dv.get("quality_std"):
+                                            st.caption(f"质量标准：{dv['quality_std']}")
+                                        if dv.get("deadline"):
+                                            st.caption(f"预计完成：{dv['deadline']}")
+                                    with row1c2:
+                                        cur_idx = STATUS_OPTS2.index(dv_status) if dv_status in STATUS_OPTS2 else 0
+                                        new_st2 = st.selectbox("状态", STATUS_OPTS2, index=cur_idx, key=f"dvst2_{dv_id}")
+                                        if st.button("✓ 保存", key=f"dvsave2_{dv_id}"):
+                                            update_deliverable(dv_id, {"status": new_st2})
+                                            st.rerun()
+                                    # 其他部门监管
+                                    with st.form(f"monitor_{dv_id}"):
+                                        mon_note = st.text_input("监管意见（任何部门均可填写）", value=dv.get("sales_note","") or "", key=f"mn_{dv_id}")
+                                        mc1, mc2 = st.columns(2)
+                                        mon_confirm = mc1.checkbox("✅ 确认达标", value=bool(dv.get("sales_confirmed")), key=f"mc_{dv_id}")
+                                        mon_flag = mc2.checkbox("🚩 标记有问题", value=bool(dv.get("sales_flagged")), key=f"mf_{dv_id}")
+                                        if st.form_submit_button("提交监管意见"):
+                                            update_deliverable(dv_id, {
+                                                "sales_note": mon_note,
+                                                "sales_confirmed": mon_confirm,
+                                                "sales_flagged": mon_flag,
+                                                "status": "有问题" if mon_flag else ("已完成" if mon_confirm else dv_status),
+                                            })
+                                            st.rerun()
+                                    if dv.get("sales_note") and not st.session_state.get(f"mn_{dv_id}"):
+                                        st.caption(f"最新意见：{dv['sales_note']}")
+                            st.divider()
+
+                        # 各部门手动新增交付物
+                        with st.expander("➕ 手动新增交付物", expanded=False):
+                            with st.form(f"add_deliv_{lid}_{gate_num}"):
+                                dc1, dc2, dc3 = st.columns(3)
+                                new_deliv = dc1.text_input("交付物名称 *", key=f"nd_name_{lid}_{gate_num}")
+                                new_deadline = dc2.text_input("预计完成时间", placeholder="如：上线前3天", key=f"nd_dl_{lid}_{gate_num}")
+                                new_owner = dc3.selectbox("负责部门", DEPT_OPTIONS, key=f"nd_dept_{lid}_{gate_num}")
+                                new_std = st.text_area("质量标准", key=f"nd_std_{lid}_{gate_num}")
+                                if st.form_submit_button("添加"):
+                                    if not new_deliv:
+                                        st.error("请填写交付物名称")
+                                    else:
+                                        save_deliverable({
+                                            "launch_id": lid, "gate_num": gate_num,
+                                            "deliverable": new_deliv, "quality_std": new_std,
+                                            "deadline": new_deadline, "owner_dept": normalize_role(new_owner),
+                                            "status": "待完成",
+                                        })
+                                        st.success(f"「{new_deliv}」已添加")
+                                        st.rerun()
+
+                        # 部门评审记录
+                        st.markdown("---")
+                        st.markdown("**🗳 部门评审**")
+                        for dept in GATE_DEPTS[gate_num]:
+                            dept_revs = [r for r in reviews if (_lc_dict(r).get("reviewer_dept")) == dept]
+                            latest = dept_revs[-1] if dept_revs else None
+                            lrd = _lc_dict(latest) if latest else {}
+                            rs = lrd.get("review_status","—")
+                            icon = {"approved":"✅","needs_revision":"🔄","rejected":"❌"}.get(rs,"⬜")
+                            c1, c2 = st.columns([2,3])
+                            c1.markdown(f"{icon} **{dept}**: {'未评审' if rs=='—' else rs}")
+                            if lrd.get("comment"): c2.caption(lrd["comment"])
+
+                        with st.form(key=f"rev_form_{lid}_{gate_num}"):
+                            r_dept = st.selectbox("我的部门", GATE_DEPTS[gate_num], key=f"rdept_{lid}_{gate_num}")
+                            r_status = st.radio(
+                                "评审结论",
+                                ["approved","needs_revision","rejected"],
+                                format_func=lambda x: {"approved":"✅ 通过","needs_revision":"🔄 需修改","rejected":"❌ 拒绝"}.get(x,x),
+                                horizontal=True, key=f"rstatus_{lid}_{gate_num}",
+                            )
+                            r_comment = st.text_area("意见备注", key=f"rcomment_{lid}_{gate_num}")
+                            if st.form_submit_button("提交评审"):
+                                save_gate_review({
+                                    "launch_id": lid, "gate_num": gate_num,
+                                    "reviewer_dept": normalize_role(r_dept), "review_status": r_status, "comment": r_comment,
+                                })
+                                st.success("评审已提交")
+                                st.rerun()
+
+                        # 复盘关专属：结构化复盘表单
+                        if gate_num == 5 and cur in ("in_progress", "passed"):
+                            st.markdown("---")
+                            st.markdown("### 📝 复盘结构化表单（上线后3-7天完成）")
+                            st.markdown("**一、三个核心判断**")
+                            with st.form(f"review5_form_{lid}"):
+                                q1 = st.text_area("① 是否有真实客户需求？（成交数/客户反应/最关心什么）", key=f"rv5_q1_{lid}")
+                                q2 = st.text_area("② 哪类客户最适合这个产品？（画像/场景/痛点）", key=f"rv5_q2_{lid}")
+                                q3 = st.text_area("③ 最大成交阻力是什么？（价格/信任/流程/话术）", key=f"rv5_q3_{lid}")
+                                st.markdown("**二、各部门反馈**")
+                                fb_sales = st.text_area("顾问反馈（话术卡点/成交率/客户问题）", key=f"rv5_sales_{lid}")
+                                fb_mkt = st.text_area("市场/推广反馈（渠道效果/最佳内容/建议）", key=f"rv5_mkt_{lid}")
+                                fb_xg = st.text_area("学管反馈（交付质量/投诉/修改率/风险点）", key=f"rv5_xg_{lid}")
+                                fb_prod = st.text_area("后台/产品反馈（价格/定位/SOP问题）", key=f"rv5_prod_{lid}")
+                                st.markdown("**三、最终结论**")
+                                conclusion = st.radio(
+                                    "本产品下一步方向",
+                                    REVIEW_CONCLUSION_OPTIONS,
+                                    horizontal=True, key=f"rv5_conclusion_{lid}",
+                                )
+                                save_to_kb = st.checkbox("✅ 沉淀到知识库（复盘结论将记录为公司经验）", key=f"rv5_kb_{lid}")
+                                if st.form_submit_button("提交复盘"):
+                                    review_text = (
+                                        f"【复盘结论】{conclusion}\n\n"
+                                        f"① 真实需求：{q1}\n② 适合客户：{q2}\n③ 最大阻力：{q3}\n\n"
+                                        f"顾问反馈：{fb_sales}\n市场反馈：{fb_mkt}\n"
+                                        f"学管反馈：{fb_xg}\n产品反馈：{fb_prod}\n\n"
+                                        f"是否沉淀知识库：{'是' if save_to_kb else '否'}"
+                                    )
+                                    save_gate_review({
+                                        "launch_id": lid, "gate_num": 5,
+                                        "reviewer_dept": "管理层",
+                                        "review_status": "approved",
+                                        "comment": review_text,
+                                    })
+                                    update_product_launch(lid, {"prev_review_done": True})
+                                    st.success(f"复盘已提交，结论：{conclusion}")
+                                    st.rerun()
+
+    # ── Tab 3: 部门互评 ────────────────────────────────────────────────────────
+    with tab3:
+        if not all_launches:
+            st.info("请先创建产品上线卡。")
+        else:
+            names3 = [_lc_dict(lc).get("product_name","—") for lc in all_launches]
+            sel3 = st.selectbox("选择产品", names3, key="fb_sel")
+            sel_lc3 = next((lc for lc in all_launches if _lc_dict(lc).get("product_name") == sel3), None)
+            if sel_lc3:
+                ld3 = _lc_dict(sel_lc3)
+                lid3 = ld3.get("id")
+                feedbacks = list_dept_feedbacks(lid3)
+
+                DEPTS_ALL = DEPT_OPTIONS
+                open_fb = [fb for fb in feedbacks if _lc_dict(fb).get("status") == "open"]
+                ack_fb = [fb for fb in feedbacks if _lc_dict(fb).get("status") == "acknowledged"]
+                res_fb = [fb for fb in feedbacks if _lc_dict(fb).get("status") == "resolved"]
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("🔴 待处理", len(open_fb))
+                col_m2.metric("🟡 已知悉", len(ack_fb))
+                col_m3.metric("🟢 已解决", len(res_fb))
+                st.divider()
+
+                with st.form("fb_form"):
+                    c1, c2 = st.columns(2)
+                    fb_from = c1.selectbox("发起部门", DEPTS_ALL, key="fb_from")
+                    fb_to = c2.selectbox("反馈对象部门", DEPTS_ALL, key="fb_to")
+                    fb_type = st.selectbox("反馈类型", FEEDBACK_TYPES, key="fb_type")
+                    fb_desc = st.text_area("详细描述", key="fb_desc")
+                    if st.form_submit_button("提交反馈"):
+                        if fb_from == fb_to:
+                            st.error("发起部门和对象部门不能相同")
+                        else:
+                            save_dept_feedback({
+                                "launch_id": lid3, "from_dept": normalize_role(fb_from),
+                                "to_dept": normalize_role(fb_to), "feedback_type": fb_type,
+                                "description": fb_desc, "status": "open",
+                            })
+                            st.success("反馈已提交")
+                            st.rerun()
+
+                st.divider()
+                st.subheader(f"📋 反馈记录（共 {len(feedbacks)} 条）")
+                for fb in feedbacks:
+                    fbd = _lc_dict(fb)
+                    fstatus = fbd.get("status","open")
+                    icon = {"open":"🔴","acknowledged":"🟡","resolved":"🟢"}.get(fstatus,"⬜")
+                    c1, c2 = st.columns([5,2])
+                    with c1:
+                        st.markdown(f"{icon} **{fbd.get('from_dept','?')} → {fbd.get('to_dept','?')}**  「{fbd.get('feedback_type','?')}」")
+                        if fbd.get("description"): st.caption(fbd["description"])
+                    with c2:
+                        fb_id = fbd.get("id")
+                        if fstatus == "open":
+                            if st.button("已知悉", key=f"fb_ack_{fb_id}"):
+                                update_dept_feedback_status(fb_id, "acknowledged"); st.rerun()
+                        elif fstatus == "acknowledged":
+                            if st.button("已解决", key=f"fb_res_{fb_id}"):
+                                update_dept_feedback_status(fb_id, "resolved"); st.rerun()
+                    st.divider()
+
+    # ── Tab 4: 新建/编辑 ──────────────────────────────────────────────────────
+    with tab4:
+        edit_mode = st.radio("操作模式", ["新建产品", "编辑已有产品"], horizontal=True)
+        if edit_mode == "新建产品":
+            with st.form("new_launch_form"):
+                st.subheader("产品上线卡 — 基本信息")
+                _cat_labels = [f"{p['name']} ({p['id']})" for p in _CATALOG_PRODUCTS]
+                _cat_lookup = dict(zip(_cat_labels, _CATALOG_PRODUCTS))
+                c1, c2 = st.columns(2)
+                with c1:
+                    nl_cat_label = st.selectbox("产品目录 *", _cat_labels)
+                    nl_cat = _cat_lookup[nl_cat_label]
+                    nl_stage = st.selectbox("阶段", ["需求判断", "上线准备", "小范围试推", "正式推广", "复盘", "暂停"])
+                    nl_target = st.text_input("目标学生需求")
+                    nl_channels = st.text_input("推荐渠道（逗号分隔）")
+                with c2:
+                    nl_backend_owner = st.text_input("后台负责人")
+                    nl_advisor_owner = st.text_input("顾问负责人")
+                    nl_xueguan_owner = st.text_input("学管负责人")
+                    nl_promo_owner = st.text_input("推广负责人")
+                    nl_deadline = st.date_input("目标上线日期")
+                nl_match_logic = st.text_area("产品匹配逻辑")
+                nl_boundary = st.text_area("销售边界 / 禁用表达")
+                nl_next_action = st.text_area("下一步动作")
+                st.subheader("行为标记（用于异常检测）")
+                bc1, bc2 = st.columns(2)
+                with bc1:
+                    nl_aq = st.checkbox("顾问已在报价")
+                    nl_pp = st.checkbox("推广素材已发出")
+                    nl_dr = st.checkbox("存在交付风险")
+                    nl_st = st.checkbox("顾问培训已完成")
+                with bc2:
+                    nl_cp = st.checkbox("顾问仍在继续承诺")
+                    nl_sx = st.checkbox("需同步给学管")
+                    nl_pl = st.number_input("推广线索数", min_value=0)
+                    nl_sf = st.number_input("销售跟进数", min_value=0)
+                if st.form_submit_button("🚀 创建产品上线卡"):
+                    save_product_launch({
+                        "catalog_id": nl_cat["id"],
+                        "product_name": nl_cat["name"],
+                        "stage": nl_stage,
+                        "target_student_needs": nl_target,
+                        "product_match_logic": nl_match_logic,
+                        "recommended_channels": nl_channels,
+                        "backend_owner": nl_backend_owner,
+                        "advisor_owner": nl_advisor_owner,
+                        "xueguan_owner": nl_xueguan_owner,
+                        "promo_owner": nl_promo_owner,
+                        "deadline": str(nl_deadline),
+                        "status_risk_boundary": "in_progress" if nl_boundary else "not_ready",
+                        "next_action": nl_next_action or nl_boundary,
+                        "has_active_quotes": nl_aq, "has_promo_published": nl_pp,
+                        "has_delivery_risk": nl_dr, "sales_training_done": nl_st,
+                        "sales_continuing_promises": nl_cp, "needs_sync_to_xueguan": nl_sx,
+                        "promo_leads_count": int(nl_pl), "sales_followup_count": int(nl_sf),
+                    })
+                    st.success(f"「{nl_cat['name']}」上线卡已创建！")
+                    st.rerun()
+        else:
+            if not all_launches:
+                st.info("暂无产品。")
+            else:
+                edit_names = [_lc_dict(lc).get("product_name","—") for lc in all_launches]
+                edit_sel = st.selectbox("选择要编辑的产品", edit_names, key="edit_sel")
+                edit_lc = next((lc for lc in all_launches if _lc_dict(lc).get("product_name") == edit_sel), None)
+                if edit_lc:
+                    ed = _lc_dict(edit_lc)
+                    eid = ed.get("id")
+                    with st.form("edit_launch_form"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            e_name = st.text_input("产品名称", value=ed.get("product_name",""), disabled=True)
+                            _stage_options = ["需求判断", "上线准备", "小范围试推", "正式推广", "复盘", "暂停"]
+                            _stage_index = _stage_options.index(ed.get("stage")) if ed.get("stage") in _stage_options else 0
+                            e_stage = st.selectbox("阶段", _stage_options, index=_stage_index)
+                            e_backend_owner = st.text_input("后台负责人", value=ed.get("backend_owner","") or "")
+                            e_advisor_owner = st.text_input("顾问负责人", value=ed.get("advisor_owner","") or "")
+                        with c2:
+                            e_xueguan_owner = st.text_input("学管负责人", value=ed.get("xueguan_owner","") or "")
+                            e_promo_owner = st.text_input("推广负责人", value=ed.get("promo_owner","") or "")
+                            e_target = st.text_input("目标学生需求", value=ed.get("target_student_needs","") or "")
+                        e_match = st.text_area("产品匹配逻辑", value=ed.get("product_match_logic","") or "")
+                        e_channels = st.text_input("推荐渠道", value=ed.get("recommended_channels","") or "")
+                        e_next = st.text_area("下一步动作", value=ed.get("next_action","") or "")
+                        st.subheader("行为标记")
+                        bc1, bc2 = st.columns(2)
+                        with bc1:
+                            e_aq = st.checkbox("顾问已在报价", value=bool(ed.get("has_active_quotes")))
+                            e_pp = st.checkbox("推广素材已发出", value=bool(ed.get("has_promo_published")))
+                            e_dr = st.checkbox("存在交付风险", value=bool(ed.get("has_delivery_risk")))
+                            e_st = st.checkbox("顾问培训已完成", value=bool(ed.get("sales_training_done")))
+                        with bc2:
+                            e_cp = st.checkbox("顾问仍在继续承诺", value=bool(ed.get("sales_continuing_promises")))
+                            e_sx = st.checkbox("需同步给学管", value=bool(ed.get("needs_sync_to_xueguan")))
+                            e_pl = st.number_input("推广线索数", value=int(ed.get("promo_leads_count") or 0))
+                            e_sf = st.number_input("销售跟进数", value=int(ed.get("sales_followup_count") or 0))
+                        if st.form_submit_button("💾 保存修改"):
+                            update_product_launch(eid, {
+                                "stage": e_stage,
+                                "backend_owner": e_backend_owner, "advisor_owner": e_advisor_owner,
+                                "xueguan_owner": e_xueguan_owner, "promo_owner": e_promo_owner,
+                                "target_student_needs": e_target, "product_match_logic": e_match,
+                                "recommended_channels": e_channels, "next_action": e_next,
+                                "has_active_quotes": e_aq, "has_promo_published": e_pp,
+                                "has_delivery_risk": e_dr, "sales_training_done": e_st,
+                                "sales_continuing_promises": e_cp, "needs_sync_to_xueguan": e_sx,
+                                "promo_leads_count": int(e_pl), "sales_followup_count": int(e_sf),
+                            })
+                            st.success("修改已保存")
+                            st.rerun()
+                    st.divider()
+                    if st.button("🗑 删除此产品上线卡", type="secondary"):
+                        delete_product_launch(eid)
+                        st.warning("已删除")
+                        st.rerun()
+
+    # ── Tab 5: 管理层审批 ──────────────────────────────────────────────────────
+    with tab5:
+        if not all_launches:
+            st.info("暂无产品上线卡。")
+        else:
+            for lc in all_launches:
+                ld = _lc_dict(lc)
+                lid = ld.get("id")
+                ap = ld.get("mgmt_approval","pending")
+                ap_note = ld.get("mgmt_approval_note","")
+                anomalies = _anomaly_check(ld)
+                with st.expander(f"{APPROVAL_LABELS.get(ap,ap)} — {ld.get('product_name','—')}", expanded=(ap=="pending")):
+                    c1, c2 = st.columns([2,3])
+                    with c1:
+                        _owners_ap = [x for x in [ld.get("advisor_owner"), ld.get("xueguan_owner"), ld.get("backend_owner")] if x]
+                        st.markdown(f"**负责人**: {' / '.join(_owners_ap) if _owners_ap else '—'}")
+                        st.markdown(f"**目标日期**: {ld.get('deadline','—')}")
+                        st.markdown(f"**产品目录ID**: {ld.get('catalog_id','—')}")
+                    with c2:
+                        gates_str = "  ".join(
+                            f"{STATUS_COLORS.get(ld.get(_gate_field(i),'not_started'),'⬜')} {GATE_NAMES[i]}"
+                            for i in range(1,6)
+                        )
+                        st.markdown(gates_str)
+                    if anomalies:
+                        st.error("存在异常，请审阅：")
+                        for a in anomalies:
+                            st.markdown(f"- {a}")
+                    with st.form(f"approval_{lid}"):
+                        new_ap = st.radio(
+                            "审批决策",
+                            ["pending","approved","deferred","adjusted","stopped"],
+                            index=["pending","approved","deferred","adjusted","stopped"].index(ap),
+                            format_func=lambda x: APPROVAL_LABELS.get(x,x),
+                            horizontal=True, key=f"ap_radio_{lid}",
+                        )
+                        new_note = st.text_area("审批意见", value=ap_note or "", key=f"ap_note_{lid}")
+                        if st.form_submit_button("提交审批"):
+                            update_product_launch(lid, {"mgmt_approval": new_ap, "mgmt_approval_note": new_note})
+                            st.success("审批已更新")
+                            st.rerun()
+
+    # ── Tab 6: 资料 & 消息 ────────────────────────────────────────────────────
+    with tab6:
+        if not all_launches:
+            st.info("请先创建产品上线卡。")
+        else:
+            names6 = [_lc_dict(lc).get("product_name","—") for lc in all_launches]
+            sel6 = st.selectbox("选择产品", names6, key="fm_sel")
+            sel_lc6 = next((lc for lc in all_launches if _lc_dict(lc).get("product_name") == sel6), None)
+            if sel_lc6:
+                ld6 = _lc_dict(sel_lc6)
+                lid6 = ld6.get("id")
+
+                sub1, sub2 = st.tabs(["📁 资料库", "💬 消息互通"])
+
+                # ── 资料库 ────────────────────────────────────────────────
+                with sub1:
+                    FILE_CATS = ["产品说明书", "销售话术", "推广素材", "交付SOP", "复盘报告", "其他"]
+                    DEPTS_UP = DEPT_OPTIONS
+                    GATE_OPTS = {0: "通用（不限关卡）", 1: "关1 产品定义关", 2: "关2 交付承接关",
+                                 3: "关3 推广准备关", 4: "关4 销售转化关", 5: "关5 复盘优化关"}
+
+                    with st.form("upload_form"):
+                        st.subheader("📤 上传资料")
+                        uploaded = st.file_uploader(
+                            "选择文件（支持 PDF/Word/Excel/图片，单文件最大50MB）",
+                            type=["pdf","docx","doc","xlsx","xls","pptx","ppt","png","jpg","jpeg","txt","md","csv"],
+                        )
+                        uc1, uc2, uc3 = st.columns(3)
+                        up_cat = uc1.selectbox("资料分类", FILE_CATS, key="up_cat")
+                        up_gate = uc2.selectbox("关联关卡", list(GATE_OPTS.keys()),
+                                                format_func=lambda x: GATE_OPTS[x], key="up_gate")
+                        up_dept = uc3.selectbox("上传部门", DEPTS_UP, key="up_dept")
+                        up_desc = st.text_input("备注说明（可选）", key="up_desc")
+                        if st.form_submit_button("📤 上传"):
+                            if not uploaded:
+                                st.error("请选择文件")
+                            else:
+                                ts = int(time.time())
+                                stored = f"{ts}_{uploaded.name}"
+                                fpath = os.path.join(UPLOAD_DIR, stored)
+                                with open(fpath, "wb") as f:
+                                    f.write(uploaded.read())
+                                save_uploaded_file({
+                                    "launch_id": lid6,
+                                    "gate_num": up_gate,
+                                    "filename": uploaded.name,
+                                    "stored_name": stored,
+                                    "file_size": os.path.getsize(fpath),
+                                    "category": up_cat,
+                                    "uploader": normalize_role(up_dept),
+                                    "description": up_desc,
+                                    "file_path": fpath,
+                                })
+                                st.success(f"「{uploaded.name}」上传成功")
+                                st.rerun()
+
+                    st.divider()
+                    st.subheader("📂 已上传资料")
+
+                    files = list_uploaded_files(lid6)
+                    if not files:
+                        st.info("暂无资料，请上传。")
+                    else:
+                        # 按关卡分组展示
+                        for gate_key, gate_label in GATE_OPTS.items():
+                            gate_files = [f for f in files if f.get("gate_num") == gate_key]
+                            if not gate_files:
+                                continue
+                            st.markdown(f"**{gate_label}**")
+                            for f in gate_files:
+                                fsize_kb = round((f.get("file_size") or 0) / 1024, 1)
+                                c1, c2, c3, c4 = st.columns([4, 2, 2, 1])
+                                c1.markdown(f"📄 {f['filename']}")
+                                c2.caption(f"{f.get('category','')} · {f.get('uploader','')}")
+                                c3.caption(f"{fsize_kb} KB · {str(f.get('created_at',''))[:16]}")
+                                # 下载按钮
+                                fpath = f.get("file_path","")
+                                if fpath and os.path.exists(fpath):
+                                    with open(fpath, "rb") as fh:
+                                        c4.download_button(
+                                            "⬇", data=fh.read(),
+                                            file_name=f["filename"],
+                                            key=f"dl_{f['id']}",
+                                        )
+                                if f.get("description"):
+                                    st.caption(f"　　↳ {f['description']}")
+                            st.divider()
+
+                # ── 消息互通 ─────────────────────────────────────────────
+                with sub2:
+                    DEPTS_MSG = DEPT_OPTIONS
+                    MSG_TYPES = ["📢 通知", "✅ 任务", "🚨 紧急", "📝 复盘"]
+
+                    with st.form("msg_form"):
+                        st.subheader("✉️ 发送消息")
+                        mc1, mc2, mc3 = st.columns(3)
+                        msg_from = mc1.selectbox("发送部门", DEPTS_MSG, key="msg_from")
+                        msg_to = mc2.selectbox("接收部门", ["全员"] + DEPTS_MSG, key="msg_to")
+                        msg_type = mc3.selectbox("消息类型", MSG_TYPES, key="msg_type")
+                        msg_content = st.text_area("消息内容 *", height=120, key="msg_content")
+                        push_wx = st.checkbox("📲 同时推送到企业微信", value=True, key="push_wx")
+                        if st.form_submit_button("发送"):
+                            if not msg_content.strip():
+                                st.error("请填写消息内容")
+                            else:
+                                push_result = ""
+                                clean_type = msg_type.split(" ")[-1]
+                                if push_wx:
+                                    wx_text = (
+                                        f"【新产品上线台 · {clean_type}】\n"
+                                        f"产品：{ld6.get('product_name','—')}\n"
+                                        f"{msg_from} → {msg_to}\n\n"
+                                        f"{msg_content}"
+                                    )
+                                    push_result = _push_wechat(wx_text)
+                                save_internal_message({
+                                    "launch_id": lid6,
+                                    "from_dept": msg_from,
+                                    "to_dept": msg_to,
+                                    "msg_type": clean_type,
+                                    "content": msg_content,
+                                    "pushed_to_wechat": push_wx,
+                                    "push_status": push_result,
+                                })
+                                if push_wx:
+                                    if "成功" in push_result:
+                                        st.success(f"消息已发送并推送企业微信 ✅")
+                                    else:
+                                        st.warning(f"消息已保存，企业微信推送：{push_result}")
+                                else:
+                                    st.success("消息已发送")
+                                st.rerun()
+
+                    st.divider()
+                    st.subheader("📋 消息记录")
+                    messages = list_internal_messages(lid6)
+                    if not messages:
+                        st.info("暂无消息记录。")
+                    else:
+                        TYPE_ICONS = {"通知":"📢","任务":"✅","紧急":"🚨","复盘":"📝"}
+                        for msg in messages:
+                            mtype = msg.get("msg_type","通知")
+                            icon = TYPE_ICONS.get(mtype,"💬")
+                            wx_tag = "📲" if msg.get("pushed_to_wechat") else ""
+                            c1, c2 = st.columns([6,2])
+                            with c1:
+                                st.markdown(
+                                    f"{icon} **{msg.get('from_dept','?')} → {msg.get('to_dept','?')}**  "
+                                    f"<small>{str(msg.get('created_at',''))[:16]}</small> {wx_tag}",
+                                    unsafe_allow_html=True,
+                                )
+                                st.markdown(f"> {msg.get('content','')}")
+                            with c2:
+                                if msg.get("push_status"):
+                                    st.caption(msg["push_status"])
+                            st.divider()

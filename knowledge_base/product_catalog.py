@@ -1,154 +1,202 @@
-"""
-极致教育 · 产品目录
-供所有 Agent 使用，确保策略输出使用真实产品名称。
-数据来源：01_产品知识库 / 销售手册
+"""极致教育产品目录事实源。
+
+正式页面和 Agent 只能使用这里的 PRODUCT_CATALOG。未命中目录的产品
+必须返回 no_data，不得展示推荐或生成任务。
 """
 
-# 产品ID → 完整产品信息
 PRODUCT_CATALOG = {
-    "regular": {
-        "name": "课业辅导（单次）",
-        "short": "课业辅导",
-        "desc": "单次作业/Essay/考试/Report辅导，按需下单。覆盖全专业，最灵活的入门选择。",
-        "target_students": "有单次作业或考试压力的留学生，首次尝试用户",
+    "language_tutoring": {
+        "name": "语言班辅导",
+        "short": "语言班辅导",
+        "desc": "语言班课程跟进与作业/考核辅导。",
+        "target_students": "语言班在读、担心无法通过语言班或衔接正课的学生",
+        "price_range": "按课程/周期定价",
+        "key_selling_points": ["语言班课程跟进", "作业与考核支持", "正课衔接准备"],
+        "aliases": ["语言班", "语言班辅导", "language course", "pre-sessional"],
+    },
+    "pse_followup": {
+        "name": "PSE跟课",
+        "short": "PSE跟课",
+        "desc": "Pre-sessional English 课程跟课与作业支持。",
+        "target_students": "PSE在读、课程节奏跟不上的学生",
+        "price_range": "按周期/课时定价",
+        "key_selling_points": ["PSE课程跟进", "课堂任务支持", "阶段考核准备"],
+        "aliases": ["PSE", "PSE跟课", "pre-sessional English"],
+    },
+    "hwept_sprint": {
+        "name": "HWEPT冲刺",
+        "short": "HWEPT冲刺",
+        "desc": "HWEPT考试专项冲刺辅导。",
+        "target_students": "需要通过HWEPT或类似语言测评的学生",
+        "price_range": "按考试/课时定价",
+        "key_selling_points": ["考试题型梳理", "短期冲刺", "弱项训练"],
+        "aliases": ["HWEPT", "HWEPT冲刺"],
+    },
+    "prestudy": {
+        "name": "开学前预习课",
+        "short": "预习课",
+        "desc": "开学前课程预习和学术适应辅导。",
+        "target_students": "即将入学、希望提前适应课程的学生",
+        "price_range": "按课程/课时定价",
+        "key_selling_points": ["提前熟悉课程", "降低开学适应压力", "基础知识补齐"],
+        "aliases": ["预习课", "开学前预习", "开学前预习课"],
+    },
+    "assignment_done": {
+        "name": "作业委托",
+        "short": "作业委托",
+        "desc": "作业/课程任务委托式支持，需明确边界与合规风险。",
+        "target_students": "DDL临近、作业压力大的学生",
+        "price_range": "按字数/难度/DDL定价",
+        "key_selling_points": ["按DDL倒排", "专业方向匹配", "交付前检查"],
+        "aliases": ["作业委托", "assignment", "coursework"],
+    },
+    "coursework_tutoring": {
+        "name": "作业辅导",
+        "short": "作业辅导",
+        "desc": "作业、Essay、Report、Presentation等课程任务辅导。",
+        "target_students": "需要理解题目、提升作业质量的学生",
         "price_range": "按字数/课时定价",
-        "key_selling_points": [
-            "灵活按需，无需预付大额",
-            "覆盖Essay、Report、考试、演讲全类型",
-            "48h内响应，急单可处理",
-        ],
-        "upsell_to": ["annual_package", "guaranteed", "dp_premium"],
-        "best_timing": "学期中随时，尤其DDL前1-2周",
+        "key_selling_points": ["题目拆解", "结构辅导", "过程反馈"],
+        "aliases": ["作业辅导", "Essay写作", "Report撰写", "课业辅导", "regular"],
     },
-    "dissertation": {
-        "name": "毕业论文辅导（Dissertation）",
-        "short": "Dissertation",
-        "desc": "毕业论文/大论文全程辅导，从选题、文献综述到终稿质检，覆盖整个论文周期。",
-        "target_students": "大三/大四/研究生即将提交毕业论文的学生",
-        "price_range": "按字数定价，通常高于普通作业",
-        "key_selling_points": [
-            "覆盖选题→提纲→文献→各章→终稿全流程",
-            "专业学科对口老师",
-            "Turnitin+AI双检测",
-        ],
-        "upsell_to": ["dp_premium"],
-        "best_timing": "毕业论文提交前3-8周，英澳论文截止高峰（5-6月、11-12月）",
+    "exam_support": {
+        "name": "考试助力",
+        "short": "考试助力",
+        "desc": "考试复习规划、重点梳理、题型训练。",
+        "target_students": "临近考试、复习没方向的学生",
+        "price_range": "按课程/课时定价",
+        "key_selling_points": ["复习计划", "重点梳理", "题型训练"],
+        "aliases": ["考试助力", "考试辅导", "exam support", "exam"],
     },
-    "final_prediction": {
-        "name": "Final精准押题",
+    "prediction": {
+        "name": "押题",
         "short": "押题",
-        "desc": "基于课程资料系统化预测考试重点，输出押题卷（主押卷+变体卷）+知识点地图。标准价¥5,000。",
-        "target_students": "期末前2-4周、复习没方向、文商社科为主",
-        "price_range": "¥5,000（标准版A档），含主押卷+变体卷",
-        "key_selling_points": [
-            "押中≥60%否则退款（文商社科全退，工科退60%）",
-            "考试画像+Topic Map+买一送一两套押题卷",
-            "48h紧急可协商",
-        ],
-        "upsell_to": ["guaranteed"],
-        "best_timing": "期末考试前2-4周，补考前",
-        "packages": {
-            "C档·秘籍轻享版": "仅Topic Map知识点地图，引流款",
-            "A档·标准押题版（主推）": "考试画像+Topic Map+主押卷+变体卷，¥5,000",
-            "B档·押题+辅导版": "A档+老师1v1讲解，适合基础薄弱学生",
-        },
+        "desc": "基于课程资料做考前重点范围判断和复习方向整理。",
+        "target_students": "期末/补考前2-4周，需要重点梳理的学生",
+        "price_range": "按课程/资料完整度定价",
+        "key_selling_points": ["重点范围判断", "复习方向整理", "题型分析"],
+        "aliases": ["押题", "Final押题", "Final精准押题", "final_prediction", "final"],
+    },
+    "guaranteed": {
+        "name": "包过辅导",
+        "short": "包过辅导",
+        "desc": "结果导向辅导产品，必须明确合同边界和客户配合要求。",
+        "target_students": "有挂科风险、必须通过的学生",
+        "price_range": "按风险和结果保障定价",
+        "key_selling_points": ["流程兜底", "合同边界", "风险共担"],
+        "aliases": ["包过", "保过", "包过辅导", "guaranteed"],
+    },
+    "dissertation_full": {
+        "name": "Dissertation全流程",
+        "short": "Dissertation",
+        "desc": "毕业论文从选题、提纲、章节到终稿的全流程支持。",
+        "target_students": "本科/硕士毕业论文阶段学生",
+        "price_range": "按字数/阶段定价",
+        "key_selling_points": ["全流程规划", "阶段反馈", "终稿检查"],
+        "aliases": ["Dissertation", "dissertation", "毕业论文", "大论文", "Dissertation全流程"],
+    },
+    "quality_70": {
+        "name": "70+质检",
+        "short": "70+质检",
+        "desc": "以目标分数为导向的质量检查和修改建议。",
+        "target_students": "希望提升作业质量、降低返修风险的学生",
+        "price_range": "按文档/字数定价",
+        "key_selling_points": ["结构检查", "评分点检查", "修改建议"],
+        "aliases": ["70+质检", "质检", "70+质量检查"],
+    },
+    "ai_reduction": {
+        "name": "降AI率",
+        "short": "降AI率",
+        "desc": "围绕AI检测风险的文本检查与表达调整服务。",
+        "target_students": "担心AI检测或学术合规风险的学生",
+        "price_range": "按字数定价",
+        "key_selling_points": ["AI风险检查", "表达调整", "合规提醒"],
+        "aliases": ["降AI率", "AI检测", "AI合规", "ai_compliance"],
     },
     "annual_package": {
         "name": "学年包",
         "short": "学年包",
-        "desc": "全学年GPA托管服务，含前三等级VIP师资、双人质检、GPA管家8阶段全程跟踪，账户制扣费。",
-        "target_students": "预估全学期消费≥2万、多门课有需求、申研有GPA要求的学生",
-        "price_range": "账户制充值，充值有赠送，余额跨学期用",
-        "key_selling_points": [
-            "GPA管家8阶段全程：建档→规划→DDL提醒→执行跟踪→出分复盘→下学期规划",
-            "前三等级高阶师资优先锁定",
-            "双人质检（A写B查）+AI检测报告",
-            "账户制扣费，余额可退，不强制清零",
-        ],
-        "upsell_to": ["dp_premium"],
-        "best_timing": "开学前1-2周（新学期规划）、老客户成绩出来后（复盘时续费）、期中后",
-        "upgrade_from": ["regular"],
+        "desc": "全学年学业服务包，覆盖规划、跟进、复盘。",
+        "target_students": "多门课、长期规划、希望稳定跟进的学生",
+        "price_range": "按学年/账户制定价",
+        "key_selling_points": ["长期规划", "固定团队", "阶段复盘"],
+        "aliases": ["学年包", "annual_package", "annual package"],
     },
-    "guaranteed": {
-        "name": "保过辅导",
-        "short": "保过",
-        "desc": "考试/写作全程辅导，不过退款。分考试类（8步流程）和写作类两条服务线，按结果收费。",
-        "target_students": "有挂科风险、必须过关、对结果要求强的学生",
-        "price_range": "高于普通辅导，按结果保障定价",
-        "key_selling_points": [
-            "不过退款，利益绑定",
-            "考试类8步完整流程：需求→方案→报价→摸底→计划→辅导→押题→结课",
-            "写作类全流程托管：选题→大纲→各章→终稿质检",
-        ],
-        "upsell_to": ["dp_premium"],
-        "best_timing": "考前4周内（焦虑感强时）、有挂科记录的老客户",
+    "course_package": {
+        "name": "包课",
+        "short": "包课",
+        "desc": "按课程整体打包的辅导产品。",
+        "target_students": "单门或多门课程需要持续跟进的学生",
+        "price_range": "按课程数量定价",
+        "key_selling_points": ["整课跟进", "成本可控", "持续反馈"],
+        "aliases": ["包课", "全课程包", "course package"],
     },
-    "dp_premium": {
-        "name": "DP高端服务（Distinction Pass）",
-        "short": "DP",
-        "desc": "行业最高端学术服务品牌，以Distinction为目标，合同约定目标分数，达不到按比例退款；挂科72h双倍赔付；安全问题所有订单免费。",
-        "target_students": "目标Distinction/1st、申研、高净值、有过被坑经历的学生",
-        "price_range": "高端定价，基础保障型+卓越安心包两档",
-        "key_selling_points": [
-            "目标分数写进合同，未达标按比例退款",
-            "挂科72h双倍赔付；安全问题造成后果所有订单免费",
-            "全职内部签约老师+独立质检+元数据清洗",
-            "项目制共享文档，30%/70%/100%节点主动反馈",
-        ],
-        "packages": {
-            "基础保障型": "确保Pass，稳步提分，未达目标分数按比例退款",
-            "卓越安心包": "冲刺Distinction/1st，全阶段质检，挂科72h双倍赔付",
-        },
-        "best_timing": "客户说申研/冲高分/之前被坑过/目标Distinction时",
+    "dp_excellence": {
+        "name": "DP卓越安心包",
+        "short": "DP卓越安心包",
+        "desc": "高目标分数导向的高端服务包。",
+        "target_students": "目标高分、申研或高净值学生",
+        "price_range": "高端定价",
+        "key_selling_points": ["目标管理", "高标准质检", "阶段交付"],
+        "aliases": ["DP卓越安心包", "DP", "dp_premium", "Distinction Pass"],
     },
-    "ai_compliance": {
-        "name": "AI合规学习",
-        "short": "AI合规",
-        "desc": "帮助学生在AI时代合规使用AI工具完成学业，规避学术风险。",
-        "target_students": "担心AI检测、想了解如何合规使用AI的学生",
-        "price_range": "待定",
-        "key_selling_points": ["合规使用AI", "规避学术处分风险"],
-        "upsell_to": [],
-        "best_timing": "开学初、学校发布AI政策时",
+    "anxin_package": {
+        "name": "安心包",
+        "short": "安心包",
+        "desc": "学期阶段性综合服务包。",
+        "target_students": "希望一段时间内统一安排学业支持的学生",
+        "price_range": "按学期/阶段定价",
+        "key_selling_points": ["统一安排", "阶段跟进", "降低沟通成本"],
+        "aliases": ["安心包"],
+    },
+    "graduation_carefree": {
+        "name": "毕业无忧",
+        "short": "毕业无忧",
+        "desc": "围绕毕业阶段论文、课程、风险管理的组合服务。",
+        "target_students": "毕业季、多任务叠加、有毕业压力的学生",
+        "price_range": "组合报价",
+        "key_selling_points": ["毕业节点规划", "多任务统筹", "风险提醒"],
+        "aliases": ["毕业无忧"],
+    },
+    "ai_top_student": {
+        "name": "AI学霸成长包",
+        "short": "AI学霸成长包",
+        "desc": "AI工具合规使用、学习效率与学术表达提升组合服务。",
+        "target_students": "希望提升AI时代学习效率且关注合规的学生",
+        "price_range": "按套餐定价",
+        "key_selling_points": ["AI工具使用", "学习效率", "合规边界"],
+        "aliases": ["AI学霸成长包"],
     },
 }
 
-# 产品升单路径（用于周度销售建议）
-UPSELL_PATHS = {
-    "regular":       ["annual_package", "guaranteed", "dp_premium"],
-    "dissertation":  ["dp_premium"],
-    "final_prediction": ["guaranteed", "annual_package"],
-    "annual_package": ["dp_premium"],
-    "guaranteed":    ["dp_premium"],
-    "dp_premium":    [],  # 已是顶级
-    "ai_compliance": ["annual_package"],
-}
-
-# 内部ID → 对外产品名（用于策略输出）
 PRODUCT_NAME_MAP = {k: v["name"] for k, v in PRODUCT_CATALOG.items()}
 
-# 季节性推荐（月份 → 优先推广产品）
+UPSELL_PATHS = {
+    "assignment_done": ["quality_70", "ai_reduction", "anxin_package"],
+    "coursework_tutoring": ["annual_package", "course_package", "dp_excellence"],
+    "exam_support": ["prediction", "guaranteed"],
+    "prediction": ["exam_support", "guaranteed"],
+    "dissertation_full": ["quality_70", "ai_reduction", "graduation_carefree"],
+    "annual_package": ["dp_excellence"],
+}
+
 SEASONAL_FOCUS = {
-    1:  ["regular", "final_prediction"],       # 1月：英国期末考
-    2:  ["regular", "final_prediction"],       # 2月：英国补考/澳洲开学
-    3:  ["annual_package", "regular"],         # 3月：澳洲开学季
-    4:  ["regular", "guaranteed"],             # 4月：英国Essay季
-    5:  ["dissertation", "regular"],           # 5月：英国Dissertation截止
-    6:  ["dissertation", "final_prediction"],  # 6月：英澳论文+期末双高峰
-    7:  ["annual_package", "dp_premium"],      # 7月：暑期规划/升单
-    8:  ["annual_package", "regular"],         # 8月：澳洲新学期
-    9:  ["annual_package", "regular"],         # 9月：英国新学期
-    10: ["regular", "guaranteed"],             # 10月：英澳期中
-    11: ["dissertation", "regular"],           # 11月：英国Dissertation
-    12: ["final_prediction", "regular"],       # 12月：期末考试季
+    1: ["exam_support", "prediction"],
+    2: ["language_tutoring", "prestudy"],
+    3: ["annual_package", "course_package"],
+    4: ["assignment_done", "coursework_tutoring"],
+    5: ["dissertation_full", "quality_70"],
+    6: ["exam_support", "prediction"],
+    7: ["graduation_carefree", "dp_excellence"],
+    8: ["prestudy", "annual_package"],
+    9: ["prestudy", "course_package"],
+    10: ["assignment_done", "quality_70"],
+    11: ["dissertation_full", "ai_reduction"],
+    12: ["exam_support", "prediction"],
 }
 
 
 def get_product_info_for_prompt(top_products: list) -> str:
-    """
-    将数据库产品统计 [(product_id, count), ...] 转换为
-    Agent Prompt 中使用的产品信息文本块。
-    """
     lines = []
     for pid, count in top_products:
         info = PRODUCT_CATALOG.get(pid)
@@ -157,12 +205,10 @@ def get_product_info_for_prompt(top_products: list) -> str:
         lines.append(
             f"- **{info['name']}**（内部ID: {pid}，近期销量: {count}单）\n"
             f"  定位：{info['desc']}\n"
-            f"  核心卖点：{'、'.join(info['key_selling_points'][:2])}\n"
-            f"  最佳推广时机：{info['best_timing']}"
+            f"  核心卖点：{'、'.join(info['key_selling_points'][:2])}"
         )
-    return "\n\n".join(lines) if lines else "（暂无产品销售数据）"
+    return "\n\n".join(lines) if lines else "暂无真实数据，无法判断。"
 
 
 def get_seasonal_products(month: int) -> list:
-    """返回该月优先推广的产品ID列表"""
-    return SEASONAL_FOCUS.get(month, ["regular"])
+    return SEASONAL_FOCUS.get(month, [])

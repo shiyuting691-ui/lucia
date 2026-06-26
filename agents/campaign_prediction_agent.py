@@ -12,7 +12,7 @@ CampaignPredictionAgent — 广告预测 Agent
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy import text
-import anthropic
+from services.llm import LLMRouter
 
 from database.db import engine
 from database import save_campaign_prediction, list_opportunity_scores, list_school_scores
@@ -39,8 +39,7 @@ def _traffic_to_score(traffic: str) -> int:
 class CampaignPredictionAgent:
     def __init__(self, config: dict = None):
         self.config = config or {}
-        self.client = anthropic.Anthropic()
-        self.model = config.get("anthropic", {}).get("model", "claude-sonnet-4-6") if config else "claude-sonnet-4-6"
+        self._router = LLMRouter()
 
     def run(self, week_start: str = None, top_schools: int = 5,
             top_products: int = 3, channels: list = None) -> list[dict]:
@@ -168,12 +167,8 @@ class CampaignPredictionAgent:
             "推理：<30字以内，说明为何此时推此产品最合适，基于数据不编造>\n"
         )
         try:
-            resp = self.client.messages.create(
-                model=self.model,
-                max_tokens=150,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text_out = resp.content[0].text.strip()
+            resp = self._router.chat(prompt, max_tokens=150, task_type="campaign_hook")
+            text_out = (resp.text or "").strip() if resp.success else ""
             hook = rationale = ""
             for line in text_out.splitlines():
                 if line.startswith("钩子："):

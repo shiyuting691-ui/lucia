@@ -16,23 +16,46 @@ class DistributionAgent:
     def __init__(self, config: dict):
         self.webhook_url = config.get("wecom_webhook", self.WECOM_WEBHOOK)
 
+    WECOM_MAX_LEN = 4000  # 企微 Markdown 上限 4096，留96作余量
+
     def _send(self, markdown: str) -> bool:
         if not self.webhook_url:
             logger.warning("DistributionAgent: no wecom_webhook configured")
             return False
-        try:
-            resp = requests.post(
-                self.webhook_url,
-                json={"msgtype": "markdown", "markdown": {"content": markdown}},
-                timeout=10,
-            )
-            ok = resp.json().get("errcode", -1) == 0
-            if not ok:
-                logger.error(f"DistributionAgent WeChat push failed: {resp.text}")
-            return ok
-        except Exception as e:
-            logger.error(f"DistributionAgent send error: {e}")
-            return False
+        # 超长时按段落切割，分多条发送
+        chunks = self._split_markdown(markdown)
+        ok = True
+        for chunk in chunks:
+            try:
+                resp = requests.post(
+                    self.webhook_url,
+                    json={"msgtype": "markdown", "markdown": {"content": chunk}},
+                    timeout=10,
+                )
+                if resp.json().get("errcode", -1) != 0:
+                    logger.error(f"DistributionAgent WeChat push failed: {resp.text}")
+                    ok = False
+            except Exception as e:
+                logger.error(f"DistributionAgent send error: {e}")
+                ok = False
+        return ok
+
+    def _split_markdown(self, text: str) -> list:
+        """按行切割，确保每段 UTF-8 字节数 ≤ WECOM_MAX_LEN（中文占3字节）"""
+        def blen(s): return len(s.encode("utf-8"))
+        if blen(text) <= self.WECOM_MAX_LEN:
+            return [text]
+        chunks, current, cur_bytes = [], [], 0
+        for line in text.splitlines(keepends=True):
+            lb = blen(line)
+            if cur_bytes + lb > self.WECOM_MAX_LEN and current:
+                chunks.append("".join(current))
+                current, cur_bytes = [], 0
+            current.append(line)
+            cur_bytes += lb
+        if current:
+            chunks.append("".join(current))
+        return chunks or [text.encode("utf-8")[:self.WECOM_MAX_LEN].decode("utf-8", errors="ignore")]
 
     def push_daily_summary(self, context: dict, sales_result: dict, feedback_result: dict) -> bool:
         today = context.get("today", datetime.utcnow().strftime("%Y-%m-%d"))

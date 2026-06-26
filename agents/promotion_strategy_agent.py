@@ -8,7 +8,8 @@ import logging
 import sys
 import os
 from datetime import datetime, date
-import anthropic
+from services.llm import LLMRouter
+from services.output_contracts import evidence_from_records, no_data_result
 from database import (
     list_orders, list_market_signals, get_current_patterns,
     list_school_calendar, save_campaign, save_suggestion,
@@ -30,8 +31,10 @@ except ImportError:
 
 try:
     from company_context import get_company_context_for_prompt
+    from student_demand_calendar import get_current_student_phase
 except ImportError:
     def get_company_context_for_prompt(): return ""
+    def get_current_student_phase(**kw): return {"prompt_block": "（学生需求周历未加载）"}
 
 # GroundedBusinessAgent — 事实检索门卫
 from agents.grounded_business_agent import GroundedBusinessAgent
@@ -42,8 +45,7 @@ logger = logging.getLogger(__name__)
 class PromotionStrategyAgent:
     def __init__(self, config: dict):
         self.config = config
-        self.client = anthropic.Anthropic()
-        self.model = config.get("anthropic", {}).get("model", "claude-sonnet-4-6")
+        self._router = LLMRouter()
         self._gba = GroundedBusinessAgent()
 
     # ─────────────────── data gathering ───────────────────
@@ -82,6 +84,7 @@ class PromotionStrategyAgent:
         return {
             "target_month": target_month,
             "order_count": len(recent_orders),
+            "orders": recent_orders[:20],
             "data_sufficient": data_ok,
             "top_products": product_counter.most_common(6),
             "top_schools": school_counter.most_common(8),
@@ -153,6 +156,18 @@ class PromotionStrategyAgent:
         seasonal_ids = get_seasonal_products(month_num)
         seasonal_names = [PRODUCT_NAME_MAP.get(pid, pid) for pid in seasonal_ids]
         seasonal_str = "、".join(seasonal_names)
+
+        # ── 学生需求周历（当月 + 下月 + 后月）──
+        from datetime import date as _date
+        student_phase = get_current_student_phase(
+            target_date=_date(year, month_num, 1)
+        )
+        next_m  = month_num % 12 + 1
+        next_y  = year + (1 if month_num == 12 else 0)
+        after_m = next_m % 12 + 1
+        after_y = next_y + (1 if next_m == 12 else 0)
+        student_phase_next  = get_current_student_phase(target_date=_date(next_y, next_m, 1))
+        student_phase_after = get_current_student_phase(target_date=_date(after_y, after_m, 1))
 
         # ── 已知产品名清单（硬约束用）──
         all_known = list(PRODUCT_CATALOG.keys())
@@ -233,43 +248,82 @@ class PromotionStrategyAgent:
 {patterns_str}
 季节性重点产品（{month_num}月通常主推）：{seasonal_str}
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 三个月学生需求预测
+
+### 🟢 本月（{target_month}）— 执行期
+{student_phase['prompt_block']}
+
+### 🟡 下月（{next_y}-{next_m:02d}）— 预备期
+英国：{student_phase_next['uk_phase']}
+澳洲：{student_phase_next['au_phase']}
+核心推广角度：{student_phase_next['messaging_angle']}
+热推产品：{', '.join(student_phase_next['hot_products'])}
+需求紧迫度：{student_phase_next['urgency']}
+{student_phase_next.get('special_note', '')}
+
+### 🔵 后月（{after_y}-{after_m:02d}）— 布局期
+英国：{student_phase_after['uk_phase']}
+澳洲：{student_phase_after['au_phase']}
+核心推广角度：{student_phase_after['messaging_angle']}
+热推产品：{', '.join(student_phase_after['hot_products'])}
+需求紧迫度：{student_phase_after['urgency']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ---
 
-请生成 {target_month} 月度推广策略报告，严格使用上方产品名称：
+请基于三个月学生需求预测，生成 {target_month} 月度推广策略报告。
+**核心原则：本月执行 + 下月预备 + 后月布局，三层同时规划，不只看眼前。**
 
 ## {target_month} 月度推广策略
 
-### 一、月度目标
+### 一、三个月需求预判（所有策略基础）
+- 本月核心需求：XXX（引用本月学生阶段）
+- 下月需求转变点：本月末需要做什么准备迎接下月需求变化？
+- 后月需要本月开始布局的事：XXX（如内容储备/资源预留）
+
+### 二、本月执行目标
 - 收入目标：¥XXX（注明推算依据）
-- 核心任务：（2-3条，聚焦本月最重要的事）
+- 核心任务：（2-3条，每条必须对应"因为学生在XX阶段"的理由）
 
-### 二、重点推广产品（按优先级排列）
-| 优先级 | 产品名称 | 推广原因 | 目标单量 | 定价/话术要点 |
-|:---:|--------|--------|:----:|----------|
-（产品名称必须完全匹配上方产品线名称）
+### 三、本月学生需求判断（先写这个，其他都基于这个）
+- 本月英国学生处于：XXX 阶段，最迫切需求是：XXX
+- 本月澳洲学生处于：XXX 阶段，最迫切需求是：XXX
+- 本月美国学生处于：XXX 阶段，最迫切需求是：XXX
+- 本月最高需求产品（原因）：XXX，因为XXX（引用上方学生阶段数据）
 
-### 三、重点目标学校
-| 学校 | 推广时机 | 推荐产品 | 渠道策略 |
-|------|--------|---------|---------|
+### 二、月度目标
+- 收入目标：¥XXX（注明推算依据）
+- 核心任务：（2-3条，每条必须对应一个"因为学生在XX阶段"的理由）
 
-### 四、核心推广活动（3-5个）
-每个活动：活动名 / 时间窗口 / 目标用户 / 主要渠道 / 预期产出
+### 三、重点推广产品（按转化优先级排列）
+| 优先级 | 产品名称 | 推广原因（引用学生阶段） | 目标学生群体 | 话术核心切入点 | 目标单量 |
+|:---:|--------|-------------------|-----------|------------|:----:|
+（产品名称必须完全匹配上方产品线名称；推广原因要写"因为英国学生现在在X阶段"这样的句子）
 
-### 五、渠道分配建议
-- 小红书：
-- 朋友圈：
-- 社群运营：
-- 1v1 私信：
+### 四、各渠道本月执行计划
+每个渠道必须写：目标学生群体 + 本月主题方向 + 发布频率 + 内容具体主题示例
+- **小红书**：（目标：XXX学生 | 主题：XXX | 频率：X次/周 | 示例主题：《XXX》）
+- **朋友圈**：（目标：XXX学生 | 主题：XXX | 频率：X次/周）
+- **社群**：（目标：XXX学生 | 运营方式：XXX | 本月活动：XXX）
+- **垂直号**：（目标：XXX学生 | 核心内容：XXX）
 
-### 六、升单路径建议
-说明本月哪些产品之间有升单机会，以及话术切入点
+### 五、本月关键活动节点（3-5个）
+格式：活动名 | 时间 | 目标学生（具体到学校/学期阶段） | 主打产品 | 预期成交
+（时间要具体到某周，目标学生要具体到"英国X大正在备考期末的学生"）
 
-### 七、内容素材清单
-列出3-5类本月需准备的素材（产品名+内容方向）
+### 六、顾问话术重点
+- 本月主要学生情绪/状态：XXX（基于学生阶段分析）
+- 最有效切入话术方向：XXX
+- 本月应避免的话术误区：XXX
 
-### 八、风险提示
-- 主要风险
-- 应对措施
+### 七、升单路径建议
+说明本月哪些产品之间有升单机会，以及对应学生阶段的话术切入点
+
+### 八、内容素材清单（推广部本月制作）
+| 优先级 | 素材类型 | 具体内容主题（必须写出来） | 目标渠道 | 目标学生 | 截止周 |
+|:---:|--------|---------------------|--------|--------|------|
+（主题必须具体，如"英国某某大学期末考试攻略：这3门课押中率最高"）
 
 ### 九、产品推广边界（基于老师储备资源）
 结合上方老师储备资源和订单风险信号，列出：
@@ -278,7 +332,37 @@ class PromotionStrategyAgent:
 - **谨慎推广产品**（老师资源紧张，先确认档期）：
 - **暂停强推产品**（资源暂停接单）：
 
-请确保所有产品名称与产品线完全一致，策略具体可执行。"""
+---
+
+## 🟡 下月预备（{next_y}-{next_m:02d}，本月需做的准备）
+
+### 下月需求转变预判
+- 下月学生需求与本月有什么核心变化？
+- 哪个产品需求会上升最快？为什么？
+- 本月末哪些线索/客户会进入下月的高需求状态？
+
+### 本月需完成的下月准备
+（不是策略，是具体要做的事）
+| 类型 | 具体准备内容 | 负责角色 | 完成截止 |
+|-----|-----------|--------|--------|
+（如：下月小红书内容储备5篇、顾问话术更新、资源预留等）
+
+### 下月内容方向预规划（本月开始制作）
+列出3-4个下月核心内容主题方向，本月开始储备：
+（主题要针对下月学生阶段，不是本月内容的延续）
+
+---
+
+## 🔵 后月布局（{after_y}-{after_m:02d}，本月开始卡位）
+
+### 本月需启动的后月布局
+- 后月学生需求是什么（简述）？
+- 本月需要开始做哪些提前卡位动作？（内容方向、资源、渠道）
+- 是否有重要节点/deadline需要本月提前准备？
+
+---
+
+请确保所有产品名称与产品线完全一致，三个时间层建议不重复，每层针对各自学生阶段。"""
 
     def generate(self, target_month: str = None) -> dict:
         if not target_month:
@@ -301,27 +385,36 @@ class PromotionStrategyAgent:
         data = self._gather_data(target_month)
 
         if not data["data_sufficient"]:
-            logger.warning("[PromotionStrategyAgent] insufficient data, generating with limited context")
+            logger.warning("[PromotionStrategyAgent] no_data: insufficient order data")
+            return {
+                **no_data_result("近12个月真实订单少于10单，不能生成月度推广策略"),
+                "target_month": target_month,
+                "can_generate": False,
+                "order_count": data["order_count"],
+            }
 
         prompt = self._build_prompt(data)
         strategy_text = ""
 
         try:
-            with self.client.messages.stream(
-                model=self.model,
-                max_tokens=2000,
-                thinking={"type": "adaptive"},
-                messages=[{"role": "user", "content": prompt}],
-            ) as stream:
-                strategy_text = stream.get_final_message().content[-1].text
+            resp = self._router.generate_text(prompt, max_tokens=3500, task_type="monthly_promotion_strategy")
+            if not resp.success or resp.provider in ("rule", "rule_fallback"):
+                logger.error(f"[PromotionStrategyAgent] no_data: LLM unavailable: {resp.error}")
+                return {
+                    **no_data_result("AI模型不可用，且月度推广策略不允许规则兜底生成"),
+                    "target_month": target_month,
+                    "can_generate": False,
+                    "order_count": data["order_count"],
+                }
+            strategy_text = resp.content
         except Exception as e:
-            # fallback without thinking
-            resp = self.client.messages.create(
-                model=self.model,
-                max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            strategy_text = resp.content[0].text
+            logger.error(f"[PromotionStrategyAgent] error: {e}")
+            return {
+                **no_data_result(f"月度推广策略生成失败：{e}"),
+                "target_month": target_month,
+                "can_generate": False,
+                "order_count": data["order_count"],
+            }
 
         # 保存为 suggestion
         suggestion_id = save_suggestion(
@@ -336,6 +429,12 @@ class PromotionStrategyAgent:
                 "facts_count":      gba_ctx["facts_count"],
                 "data_source_note": gba_ctx["data_source_note"],
                 "missing_info":     gba_ctx["missing_information"],
+                "evidence": (
+                    evidence_from_records("orders", data.get("orders", []), limit=8)
+                    or [f"orders.count={data['order_count']}"]
+                ),
+                "confidence": "medium",
+                "responsible_role": "推广/市场",
             },
             priority="high",
         )

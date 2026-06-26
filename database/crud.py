@@ -405,6 +405,27 @@ def update_feedback_status(feedback_id: int, status: str) -> bool:
 def save_suggestion(data: dict = None, **kwargs) -> int:
     """支持两种调用方式：save_suggestion(dict) 或 save_suggestion(title=..., content=..., ...)"""
     d = data if data is not None else kwargs
+    try:
+        from services.output_contracts import validate_formal_output
+        basis = d.get("data_basis") or {}
+        guard_payload = {
+            "evidence": basis.get("evidence") or basis.get("data_evidence"),
+            "confidence": basis.get("confidence"),
+            "responsible_role": basis.get("responsible_role") or d.get("responsible_role") or d.get("department"),
+            "related_product": d.get("related_product"),
+            "no_data": basis.get("no_data") is True,
+            "recommendation": d.get("recommendation") or d.get("content"),
+        }
+        guard = validate_formal_output(
+            guard_payload,
+            require_product=bool(d.get("related_product")),
+            require_recommendation=True,
+        )
+        d["data_basis"] = {**basis, "guardrail": guard}
+        if d.get("source", "AI生成") == "AI生成" and guard["validation_status"] != "valid":
+            d["status"] = "archived"
+    except Exception:
+        pass
     with get_session() as s:
         sg = StrategySuggestion(
             title           = d.get("title", ""),
@@ -433,13 +454,24 @@ def list_suggestions(status: str = None, priority: str = None,
         )
         if status:
             q = q.where(StrategySuggestion.status == status)
+        else:
+            q = q.where(StrategySuggestion.status != "archived")
         if priority:
             q = q.where(StrategySuggestion.priority == priority)
         if suggestion_type:
             q = q.where(StrategySuggestion.suggestion_type == suggestion_type)
         rows = s.execute(q.limit(limit)).scalars().all()
-        return [
-            {
+        result = []
+        for r in rows:
+            guard = ((r.data_basis or {}).get("guardrail") or {})
+            if not status and r.source not in ("管理层", "人工录入", "人工"):
+                if guard.get("validation_status") != "valid":
+                    continue
+                if not guard:
+                    continue
+            if not status and r.source == "AI生成" and guard.get("validation_status") != "valid":
+                continue
+            result.append({
                 "id":               r.id,
                 "title":            r.title,
                 "suggestion_type":  r.suggestion_type,
@@ -454,9 +486,8 @@ def list_suggestions(status: str = None, priority: str = None,
                 "status":           r.status,
                 "source":           r.source,
                 "created_at":       r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in rows
-        ]
+            })
+        return result
 
 
 def update_suggestion_status(sg_id: int, status: str) -> bool:
@@ -474,12 +505,16 @@ def update_suggestion_status(sg_id: int, status: str) -> bool:
 # ─────────────────────────────────────────
 
 def save_task(data: dict) -> int:
+    from services.business_constants import normalize_department, is_valid_department
+    dept = normalize_department(data.get("department", ""))
+    if not is_valid_department(dept):
+        raise ValueError("角色定义不匹配，无法创建任务")
     with get_session() as s:
         task = Task(
             title               = data.get("title", ""),
             description         = data.get("description", ""),
             task_type           = data.get("task_type", ""),
-            department          = data.get("department", ""),
+            department          = dept,
             owner               = data.get("owner", ""),
             priority            = data.get("priority", "中"),
             task_source         = data.get("task_source", "AI生成"),
@@ -765,28 +800,38 @@ def list_orders(days: int = 30, school: str = None, country: str = None,
 
 
 def get_order_stats(days: int = 30) -> dict:
-    """按学校/产品/国家汇总近N天订单"""
+    """按学校/产品/国家汇总近N天订单；days=0 表示全量"""
     from datetime import timedelta
     with get_session() as s:
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        rows = s.execute(
-            select(Order).where(Order.order_date >= cutoff)
-        ).scalars().all()
+        q = select(Order)
+        if days and days > 0:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            q = q.where(Order.order_date >= cutoff)
+        rows = s.execute(q).scalars().all()
         school_cnt: dict = {}
         product_cnt: dict = {}
         country_cnt: dict = {}
+        revenue_by_product: dict = {}
+        revenue_by_school: dict = {}
         total_amount = 0.0
         for r in rows:
-            school_cnt[r.school or "未知"] = school_cnt.get(r.school or "未知", 0) + 1
-            product_cnt[r.product or "未知"] = product_cnt.get(r.product or "未知", 0) + 1
+            sch = r.school or "未知"
+            prd = r.product or "未知"
+            amt = r.amount or 0
+            school_cnt[sch] = school_cnt.get(sch, 0) + 1
+            product_cnt[prd] = product_cnt.get(prd, 0) + 1
             country_cnt[r.country or "未知"] = country_cnt.get(r.country or "未知", 0) + 1
-            total_amount += r.amount or 0
+            revenue_by_product[prd] = revenue_by_product.get(prd, 0) + amt
+            revenue_by_school[sch] = revenue_by_school.get(sch, 0) + amt
+            total_amount += amt
         return {
             "total": len(rows),
             "total_amount": total_amount,
             "by_school": sorted(school_cnt.items(), key=lambda x: -x[1]),
             "by_product": sorted(product_cnt.items(), key=lambda x: -x[1]),
             "by_country": sorted(country_cnt.items(), key=lambda x: -x[1]),
+            "revenue_by_product": sorted(revenue_by_product.items(), key=lambda x: -x[1]),
+            "revenue_by_school": sorted(revenue_by_school.items(), key=lambda x: -x[1]),
         }
 
 
@@ -848,10 +893,11 @@ def list_leads(days: int = 30, school: str = None, country: str = None,
 def get_lead_stats(days: int = 30) -> dict:
     from datetime import timedelta
     with get_session() as s:
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        rows = s.execute(
-            select(Lead).where(Lead.inquiry_date >= cutoff)
-        ).scalars().all()
+        q = select(Lead)
+        if days and days > 0:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            q = q.where(Lead.inquiry_date >= cutoff)
+        rows = s.execute(q).scalars().all()
         school_cnt: dict = {}
         product_cnt: dict = {}
         channel_cnt: dict = {}
@@ -860,8 +906,8 @@ def get_lead_stats(days: int = 30) -> dict:
             school_cnt[r.school or "未知"] = school_cnt.get(r.school or "未知", 0) + 1
             product_cnt[r.product_interest or "未知"] = product_cnt.get(r.product_interest or "未知", 0) + 1
             channel_cnt[r.source_channel or "未知"] = channel_cnt.get(r.source_channel or "未知", 0) + 1
-            if r.deal_status == "won": won += 1
-            if r.deal_status == "lost": lost += 1
+            if r.deal_status in ("won", "completed"): won += 1
+            if r.deal_status in ("lost", "failed"): lost += 1
         return {
             "total": len(rows),
             "won": won,
@@ -1995,3 +2041,1041 @@ def list_attribution_snapshots(limit: int = 10) -> list:
             "key_insights":  o.key_insights or [],
             "created_at":    str(o.created_at),
         } for o in objs]
+
+
+# ── V11 渠道与角色归因 CRUD ─────────────────────────────
+
+def save_channel_performance(data: dict):
+    """保存渠道表现快照（period+channel+owner_role 唯一）"""
+    from .models import ChannelPerformance
+    with get_session() as s:
+        existing = s.query(ChannelPerformance).filter_by(
+            period=data["period"],
+            channel=data["channel"],
+            owner_role=data.get("owner_role", ""),
+        ).first()
+        if existing:
+            for k, v in data.items():
+                setattr(existing, k, v)
+        else:
+            s.add(ChannelPerformance(**data))
+        s.commit()
+
+
+def list_channel_performance(period: str = None, limit: int = 100) -> list:
+    from .models import ChannelPerformance
+    with get_session() as s:
+        q = s.query(ChannelPerformance)
+        if period:
+            q = q.filter(ChannelPerformance.period == period)
+        rows = q.order_by(ChannelPerformance.leads_count.desc()).limit(limit).all()
+        return [r.__dict__ for r in rows]
+
+
+def save_role_execution_metrics(data: dict):
+    from .models import RoleExecutionMetrics
+    with get_session() as s:
+        existing = s.query(RoleExecutionMetrics).filter_by(
+            period=data["period"],
+            role=data["role"],
+            channel=data.get("channel", ""),
+        ).first()
+        if existing:
+            for k, v in data.items():
+                setattr(existing, k, v)
+        else:
+            s.add(RoleExecutionMetrics(**data))
+        s.commit()
+
+
+def list_role_execution_metrics(period: str = None, limit: int = 100) -> list:
+    from .models import RoleExecutionMetrics
+    with get_session() as s:
+        q = s.query(RoleExecutionMetrics)
+        if period:
+            q = q.filter(RoleExecutionMetrics.period == period)
+        rows = q.order_by(RoleExecutionMetrics.deal_amount.desc()).limit(limit).all()
+        return [r.__dict__ for r in rows]
+
+
+# ── CRM 同步 upsert 函数 ─────────────────────────────────────────────────
+
+def upsert_lead_from_crm(data: dict) -> str:
+    """
+    按 crm_id 做 upsert。
+    返回 "created" 或 "updated"。
+    """
+    from datetime import datetime as _dt
+    def _parse(v):
+        if isinstance(v, str) and v:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try: return _dt.strptime(v, fmt)
+                except ValueError: pass
+        return v or None
+
+    crm_id = data.get("crm_id", "")
+    with get_session() as s:
+        obj = s.query(Lead).filter(Lead.crm_id == crm_id).first() if crm_id else None
+        action = "updated" if obj else "created"
+        if not obj:
+            obj = Lead()
+            s.add(obj)
+
+        obj.crm_id          = crm_id
+        obj.crm_source      = data.get("crm_source", "huoban")
+        obj.crm_updated_at  = data.get("crm_updated_at", "")
+        obj.customer_name   = data.get("name", data.get("student_name", ""))
+        obj.school          = data.get("school", "")
+        obj.country         = data.get("country_region", data.get("country", ""))
+        obj.major           = data.get("major", "")
+        obj.deal_status     = data.get("deal_status", "new")
+        obj.sales_owner     = data.get("sales_owner", "")
+        obj.assigned_person = data.get("assigned_person", "")
+        if data.get("inquiry_date"):
+            obj.inquiry_date = _parse(data["inquiry_date"])
+        if data.get("total_spend"):
+            obj.deal_amount = float(data["total_spend"] or 0)
+        s.flush()
+        return action
+
+
+def upsert_order_from_crm(data: dict) -> str:
+    """
+    按 crm_id 做 upsert。
+    返回 "created" 或 "updated"。
+    """
+    from datetime import datetime as _dt
+    def _parse(v):
+        if isinstance(v, str) and v:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try: return _dt.strptime(v, fmt)
+                except ValueError: pass
+        return v or None
+
+    crm_id = data.get("crm_id", "")
+    with get_session() as s:
+        obj = s.query(Order).filter(Order.crm_id == crm_id).first() if crm_id else None
+        action = "updated" if obj else "created"
+        if not obj:
+            obj = Order()
+            s.add(obj)
+
+        obj.crm_id        = crm_id
+        obj.crm_source    = data.get("crm_source", "huoban")
+        obj.crm_updated_at= data.get("crm_updated_at", "")
+        obj.customer_id   = data.get("customer_name", "")
+        obj.product       = data.get("product", "")
+        obj.major         = data.get("major", "")
+        obj.amount        = float(data.get("amount", 0) or 0)
+        obj.sales_owner   = data.get("sales_owner", "")
+        obj.status        = data.get("status", "confirmed")
+        obj.country       = data.get("country", "") or obj.country
+        obj.school        = data.get("school", "") or obj.school
+        obj.service_type  = data.get("service_type", "") or obj.service_type
+        if data.get("order_date"):
+            obj.order_date = _parse(data["order_date"])
+        s.flush()
+        return action
+
+
+# ── 执行反馈 CRUD ────────────────────────────────────────────────────────────
+
+def save_execution_feedback(data: dict) -> int:
+    """保存执行反馈记录，返回 id"""
+    from .models import ExecutionFeedback
+    with get_session() as s:
+        obj = ExecutionFeedback(
+            action_id       = data.get("action_id", ""),
+            push_date       = data.get("push_date", ""),
+            department      = data.get("department", ""),
+            action_text     = data.get("action_text", ""),
+            priority        = data.get("priority", "P1"),
+            expected_result = data.get("expected_result", ""),
+            actual_result   = data.get("actual_result", ""),
+            completed       = data.get("completed"),
+            deviation       = data.get("deviation", ""),
+            reason          = data.get("reason", ""),
+            feedback_by     = data.get("feedback_by", ""),
+        )
+        s.add(obj)
+        s.flush()
+        return obj.id
+
+
+def list_execution_feedbacks(push_date: str = None, department: str = None, limit: int = 100) -> list:
+    from .models import ExecutionFeedback
+    with get_session() as s:
+        q = s.query(ExecutionFeedback)
+        if push_date:
+            q = q.filter(ExecutionFeedback.push_date == push_date)
+        if department:
+            q = q.filter(ExecutionFeedback.department == department)
+        rows = q.order_by(ExecutionFeedback.created_at.desc()).limit(limit).all()
+        return [_row(r) for r in rows]
+
+
+def update_execution_feedback(feedback_id: int, updates: dict) -> bool:
+    from .models import ExecutionFeedback
+    with get_session() as s:
+        obj = s.query(ExecutionFeedback).filter(ExecutionFeedback.id == feedback_id).first()
+        if not obj:
+            return False
+        for k, v in updates.items():
+            if hasattr(obj, k):
+                setattr(obj, k, v)
+        return True
+
+
+def save_llm_call_log(data: dict) -> int:
+    from .models import LLMCallLog
+    with get_session() as s:
+        obj = LLMCallLog(
+            task_type         = data.get("task_type", ""),
+            provider          = data.get("provider", ""),
+            model             = data.get("model", ""),
+            success           = bool(data.get("success", False)),
+            error_type        = data.get("error_type", ""),
+            error_message     = data.get("error_message", ""),
+            latency_ms        = int(data.get("latency_ms", 0)),
+            prompt_tokens     = int(data.get("prompt_tokens", 0)),
+            completion_tokens = int(data.get("completion_tokens", 0)),
+            total_tokens      = int(data.get("total_tokens", 0)),
+            fallback_used     = bool(data.get("fallback_used", False)),
+            metadata_json     = data.get("metadata_json", {}),
+        )
+        s.add(obj)
+        s.flush()
+        return obj.id
+
+
+def get_execution_feedback_stats(push_date: str = None) -> dict:
+    """统计各部门完成率"""
+    from .models import ExecutionFeedback
+    with get_session() as s:
+        q = s.query(ExecutionFeedback)
+        if push_date:
+            q = q.filter(ExecutionFeedback.push_date == push_date)
+        rows = q.all()
+        if not rows:
+            return {"total": 0, "completed": 0, "rate": 0.0, "by_dept": {}}
+        total     = len(rows)
+        completed = sum(1 for r in rows if r.completed is True)
+        by_dept   = {}
+        for r in rows:
+            dept = r.department or "unknown"
+            by_dept.setdefault(dept, {"total": 0, "completed": 0})
+            by_dept[dept]["total"] += 1
+            if r.completed is True:
+                by_dept[dept]["completed"] += 1
+        for dept in by_dept:
+            t = by_dept[dept]["total"]
+            c = by_dept[dept]["completed"]
+            by_dept[dept]["rate"] = round(c / t * 100, 1) if t else 0.0
+        return {
+            "total":     total,
+            "completed": completed,
+            "rate":      round(completed / total * 100, 1),
+            "by_dept":   by_dept,
+        }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2：渠道内容策略建议
+# ─────────────────────────────────────────────────────────────────────────────
+def save_channel_content_recommendation(data: dict) -> int:
+    from .models import ChannelContentRecommendation
+    from services.output_contracts import validate_content_strategy_record
+    safe, guard = validate_content_strategy_record(data)
+    with get_session() as s:
+        row = ChannelContentRecommendation(**{
+            k: v for k, v in safe.items()
+            if hasattr(ChannelContentRecommendation, k)
+        })
+        if hasattr(ChannelContentRecommendation, "status") and guard["validation_status"] != "valid":
+            row.status = "skipped"
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_channel_content_recommendations(rec_date: str = None, channel: str = None,
+                                          status: str = None, limit: int = 50) -> list:
+    from .models import ChannelContentRecommendation
+    with get_session() as s:
+        q = s.query(ChannelContentRecommendation)
+        if rec_date:
+            q = q.filter(ChannelContentRecommendation.rec_date == rec_date)
+        if channel:
+            q = q.filter(ChannelContentRecommendation.channel == channel)
+        if status:
+            q = q.filter(ChannelContentRecommendation.status == status)
+        rows = q.order_by(ChannelContentRecommendation.created_at.desc()).limit(limit).all()
+        result = []
+        for r in rows:
+            result.append({c.name: getattr(r, c.name) for c in r.__table__.columns})
+        return result
+
+
+def update_channel_content_status(rec_id: int, status: str, actual_leads: int = None):
+    from .models import ChannelContentRecommendation
+    from datetime import datetime
+    with get_session() as s:
+        row = s.query(ChannelContentRecommendation).get(rec_id)
+        if row:
+            row.status = status
+            if status == "published":
+                row.published_at = datetime.utcnow()
+            if actual_leads is not None:
+                row.actual_leads = actual_leads
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2：时间窗口预测
+# ─────────────────────────────────────────────────────────────────────────────
+def save_time_window_forecast(data: dict) -> int:
+    from .models import TimeWindowForecast
+    with get_session() as s:
+        row = TimeWindowForecast(**{
+            k: v for k, v in data.items()
+            if hasattr(TimeWindowForecast, k)
+        })
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_time_window_forecasts(forecast_date: str = None, window: str = None,
+                                limit: int = 100) -> list:
+    from .models import TimeWindowForecast
+    with get_session() as s:
+        q = s.query(TimeWindowForecast)
+        if forecast_date:
+            q = q.filter(TimeWindowForecast.forecast_date == forecast_date)
+        if window:
+            q = q.filter(TimeWindowForecast.window == window)
+        rows = q.order_by(TimeWindowForecast.demand_score.desc()).limit(limit).all()
+        result = []
+        for r in rows:
+            result.append({c.name: getattr(r, c.name) for c in r.__table__.columns})
+        return result
+
+
+def get_latest_time_window_forecasts() -> list:
+    """返回最新一次生成的所有时间窗口预测（按 window 排序）"""
+    from .models import TimeWindowForecast
+    with get_session() as s:
+        latest = s.query(TimeWindowForecast.forecast_date).order_by(
+            TimeWindowForecast.created_at.desc()
+        ).first()
+        if not latest:
+            return []
+        rows = s.query(TimeWindowForecast).filter(
+            TimeWindowForecast.forecast_date == latest[0]
+        ).order_by(TimeWindowForecast.window, TimeWindowForecast.demand_score.desc()).all()
+        result = []
+        for r in rows:
+            result.append({c.name: getattr(r, c.name) for c in r.__table__.columns})
+        return result
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 v2：content_strategy_recommendations（统一表名）
+# ─────────────────────────────────────────────────────────────────────────────
+def save_content_strategy_recommendation(data: dict) -> int:
+    from .models import ContentStrategyRecommendation
+    from services.output_contracts import validate_content_strategy_record
+    safe, guard = validate_content_strategy_record(data)
+    with get_session() as s:
+        row = ContentStrategyRecommendation(**{
+            k: v for k, v in safe.items()
+            if hasattr(ContentStrategyRecommendation, k)
+        })
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_content_strategy_recommendations(
+    rec_date: str = None, time_window: str = None,
+    channel: str = None, status: str = None, limit: int = 100
+) -> list:
+    from .models import ContentStrategyRecommendation
+    with get_session() as s:
+        q = s.query(ContentStrategyRecommendation)
+        if rec_date:
+            q = q.filter(ContentStrategyRecommendation.rec_date == rec_date)
+        if time_window:
+            q = q.filter(ContentStrategyRecommendation.time_window == time_window)
+        if channel:
+            q = q.filter(ContentStrategyRecommendation.channel == channel)
+        if status:
+            q = q.filter(ContentStrategyRecommendation.status == status)
+        rows = q.order_by(ContentStrategyRecommendation.created_at.desc()).limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+
+def update_content_strategy_status(rec_id: int, status: str):
+    from .models import ContentStrategyRecommendation
+    with get_session() as s:
+        row = s.query(ContentStrategyRecommendation).get(rec_id)
+        if row:
+            row.status = status
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 v2：channel_contents
+# ─────────────────────────────────────────────────────────────────────────────
+def save_channel_content(data: dict) -> int:
+    from .models import ChannelContent
+    with get_session() as s:
+        row = ChannelContent(**{
+            k: v for k, v in data.items()
+            if hasattr(ChannelContent, k)
+        })
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_channel_contents(
+    content_date: str = None, channel: str = None,
+    status: str = None, limit: int = 100
+) -> list:
+    from .models import ChannelContent
+    with get_session() as s:
+        q = s.query(ChannelContent)
+        if content_date:
+            q = q.filter(ChannelContent.content_date == content_date)
+        if channel:
+            q = q.filter(ChannelContent.channel == channel)
+        if status:
+            q = q.filter(ChannelContent.status == status)
+        rows = q.order_by(ChannelContent.created_at.desc()).limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+
+def update_channel_content(content_id: int, updates: dict):
+    from .models import ChannelContent
+    from datetime import datetime
+    with get_session() as s:
+        row = s.query(ChannelContent).get(content_id)
+        if not row:
+            return
+        for k, v in updates.items():
+            if hasattr(row, k):
+                setattr(row, k, v)
+        if updates.get("status") == "published" and not row.published_at:
+            row.published_at = datetime.utcnow()
+
+
+def record_channel_content_result(content_id: int, actual_leads: int,
+                                   actual_orders: int, feedback_note: str = ""):
+    """记录内容实际效果，同步写 channel_performance 快照"""
+    from .models import ChannelContent, ChannelPerformance
+    with get_session() as s:
+        row = s.query(ChannelContent).get(content_id)
+        if not row:
+            return
+        row.actual_leads  = actual_leads
+        row.actual_orders = actual_orders
+        row.feedback_note = feedback_note
+        # 写 channel_performance 快照
+        perf = ChannelPerformance(
+            channel        = row.channel,
+            school         = row.school_name,
+            product_id     = row.product_id,
+            period_start   = row.content_date,
+            period_end     = row.content_date,
+            leads_count    = actual_leads,
+            orders_count   = actual_orders,
+            content_count  = 1,
+        )
+        s.add(perf)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 v2：weekly_growth_briefs
+# ─────────────────────────────────────────────────────────────────────────────
+def save_weekly_growth_brief(data: dict) -> int:
+    from .models import WeeklyGrowthBrief
+    with get_session() as s:
+        row = WeeklyGrowthBrief(**{
+            k: v for k, v in data.items()
+            if hasattr(WeeklyGrowthBrief, k)
+        })
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def get_latest_growth_brief() -> dict:
+    from .models import WeeklyGrowthBrief
+    with get_session() as s:
+        row = s.query(WeeklyGrowthBrief).order_by(
+            WeeklyGrowthBrief.created_at.desc()
+        ).first()
+        if not row:
+            return {}
+        return {c.name: getattr(row, c.name) for c in row.__table__.columns}
+
+
+def list_growth_briefs(limit: int = 10) -> list:
+    from .models import WeeklyGrowthBrief
+    with get_session() as s:
+        rows = s.query(WeeklyGrowthBrief).order_by(
+            WeeklyGrowthBrief.created_at.desc()
+        ).limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+
+def mark_growth_brief_pushed(brief_id: int, chunks: int):
+    from .models import WeeklyGrowthBrief
+    with get_session() as s:
+        row = s.query(WeeklyGrowthBrief).get(brief_id)
+        if row:
+            row.push_sent   = True
+            row.push_chunks = chunks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 v2：time_window_forecasts（带 role_actions 的新版存取）
+# ─────────────────────────────────────────────────────────────────────────────
+def save_time_window_forecast_v2(data: dict) -> int:
+    from .models import TimeWindowForecast
+    with get_session() as s:
+        row = TimeWindowForecast(**{
+            k: v for k, v in data.items()
+            if hasattr(TimeWindowForecast, k)
+        })
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def get_latest_forecasts_by_window() -> dict:
+    """返回最新一次的预测，按 window 枚举分组"""
+    from .models import TimeWindowForecast
+    with get_session() as s:
+        latest_date = s.query(TimeWindowForecast.forecast_date).order_by(
+            TimeWindowForecast.created_at.desc()
+        ).first()
+        if not latest_date:
+            return {}
+        rows = s.query(TimeWindowForecast).filter(
+            TimeWindowForecast.forecast_date == latest_date[0]
+        ).order_by(TimeWindowForecast.demand_score.desc()).all()
+        result: dict = {}
+        for r in rows:
+            w = r.window
+            if w not in result:
+                result[w] = []
+            result[w].append({c.name: getattr(r, c.name) for c in r.__table__.columns})
+        return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# V11 新产品上线台 CRUD
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_product_launch(data: dict) -> int:
+    from .models import ProductLaunch
+    from services.guardrails import validate_product
+    catalog_id = data.get("catalog_id")
+    raw_name = data.get("product_name") or catalog_id
+    product_check = validate_product(raw_name)
+    if not product_check["valid"]:
+        raise ValueError(f"产品未通过目录校验：{raw_name}")
+    data["catalog_id"] = product_check["canonical_product_id"]
+    data["product_name"] = data.get("product_name") or product_check["canonical_product_id"]
+    with get_session() as s:
+        row = ProductLaunch(**{k: v for k, v in data.items()
+                               if hasattr(ProductLaunch, k)})
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_product_launches(stage: str = None) -> list:
+    from .models import ProductLaunch
+    with get_session() as s:
+        q = s.query(ProductLaunch).order_by(ProductLaunch.updated_at.desc())
+        if stage:
+            q = q.filter(ProductLaunch.stage == stage)
+        rows = q.all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+
+def get_product_launch(launch_id: int) -> dict:
+    from .models import ProductLaunch
+    with get_session() as s:
+        row = s.query(ProductLaunch).get(launch_id)
+        if not row:
+            return {}
+        return {c.name: getattr(row, c.name) for c in row.__table__.columns}
+
+
+def update_product_launch(launch_id: int, data: dict) -> bool:
+    from .models import ProductLaunch
+    if "product_name" in data or "catalog_id" in data:
+        from services.guardrails import validate_product
+        product_check = validate_product(data.get("product_name") or data.get("catalog_id"))
+        if not product_check["valid"]:
+            raise ValueError(f"产品未通过目录校验：{data.get('product_name') or data.get('catalog_id')}")
+        data["catalog_id"] = product_check["canonical_product_id"]
+    with get_session() as s:
+        row = s.query(ProductLaunch).get(launch_id)
+        if not row:
+            return False
+        for k, v in data.items():
+            if hasattr(row, k) and k not in ("id", "created_at"):
+                setattr(row, k, v)
+        row.updated_at = datetime.utcnow()
+        return True
+
+
+def delete_product_launch(launch_id: int) -> bool:
+    from .models import ProductLaunch
+    with get_session() as s:
+        row = s.query(ProductLaunch).get(launch_id)
+        if not row:
+            return False
+        s.delete(row)
+        return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# V11 关卡审核 & 部门互评 CRUD + 迁移
+# ─────────────────────────────────────────────────────────────────────────────
+
+def migrate_product_launch_v2():
+    """为已存在的 product_launches 表补充 V11 新增列（幂等）"""
+    from .db import engine
+    new_cols = [
+        ("gate1_status",              "VARCHAR(20) DEFAULT 'not_started'"),
+        ("gate2_status",              "VARCHAR(20) DEFAULT 'not_started'"),
+        ("gate3_status",              "VARCHAR(20) DEFAULT 'not_started'"),
+        ("gate4_status",              "VARCHAR(20) DEFAULT 'not_started'"),
+        ("gate5_status",              "VARCHAR(20) DEFAULT 'not_started'"),
+        ("mgmt_approval",             "VARCHAR(30) DEFAULT 'pending'"),
+        ("mgmt_approval_note",        "TEXT"),
+        ("has_active_quotes",         "BOOLEAN DEFAULT 0"),
+        ("has_promo_published",       "BOOLEAN DEFAULT 0"),
+        ("has_delivery_risk",         "BOOLEAN DEFAULT 0"),
+        ("sales_training_done",       "BOOLEAN DEFAULT 0"),
+        ("sales_continuing_promises", "BOOLEAN DEFAULT 0"),
+        ("needs_sync_to_xueguan",     "BOOLEAN DEFAULT 0"),
+        ("promo_leads_count",         "INTEGER DEFAULT 0"),
+        ("sales_followup_count",      "INTEGER DEFAULT 0"),
+        ("prev_review_done",          "BOOLEAN DEFAULT 0"),
+        ("launch_date",               "DATETIME"),
+    ]
+    with engine.connect() as conn:
+        for col, col_def in new_cols:
+            try:
+                conn.execute(__import__("sqlalchemy").text(
+                    f"ALTER TABLE product_launches ADD COLUMN {col} {col_def}"
+                ))
+                conn.commit()
+            except Exception:
+                pass  # 列已存在，忽略
+
+
+def save_gate_review(data: dict) -> int:
+    from .models import LaunchGateReview
+    with get_session() as s:
+        row = LaunchGateReview(**{k: v for k, v in data.items()
+                                  if hasattr(LaunchGateReview, k)})
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_gate_reviews(launch_id: int, gate_num: int = None) -> list:
+    from .models import LaunchGateReview
+    with get_session() as s:
+        q = s.query(LaunchGateReview).filter(LaunchGateReview.launch_id == launch_id)
+        if gate_num:
+            q = q.filter(LaunchGateReview.gate_num == gate_num)
+        rows = q.order_by(LaunchGateReview.created_at.desc()).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+
+def save_dept_feedback(data: dict) -> int:
+    from .models import LaunchDeptFeedback
+    with get_session() as s:
+        row = LaunchDeptFeedback(**{k: v for k, v in data.items()
+                                    if hasattr(LaunchDeptFeedback, k)})
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_dept_feedbacks(launch_id: int) -> list:
+    from .models import LaunchDeptFeedback
+    with get_session() as s:
+        rows = (s.query(LaunchDeptFeedback)
+                .filter(LaunchDeptFeedback.launch_id == launch_id)
+                .order_by(LaunchDeptFeedback.created_at.desc()).all())
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+
+def update_dept_feedback_status(fb_id: int, status: str):
+    from .models import LaunchDeptFeedback
+    with get_session() as s:
+        row = s.query(LaunchDeptFeedback).get(fb_id)
+        if row:
+            row.status = status
+
+
+# ── 资料上传 ──────────────────────────────────────────────────────────────────
+def save_uploaded_file(data: dict) -> int:
+    from .models import UploadedFile
+    with get_session() as s:
+        row = UploadedFile(**{k: v for k, v in data.items() if k != "id"})
+        s.add(row)
+        s.flush()
+        return row.id
+
+def list_uploaded_files(launch_id: int, gate_num: int = None) -> list:
+    from .models import UploadedFile
+    with get_session() as s:
+        q = s.query(UploadedFile).filter(UploadedFile.launch_id == launch_id)
+        if gate_num is not None:
+            q = q.filter(UploadedFile.gate_num == gate_num)
+        rows = q.order_by(UploadedFile.created_at.desc()).all()
+        return [
+            {c.name: getattr(r, c.name) for c in r.__table__.columns}
+            for r in rows
+        ]
+
+def delete_uploaded_file(file_id: int) -> str:
+    from .models import UploadedFile
+    import os
+    with get_session() as s:
+        row = s.query(UploadedFile).get(file_id)
+        if row:
+            path = row.file_path
+            s.delete(row)
+            return path
+    return ""
+
+
+# ── 内部消息 ──────────────────────────────────────────────────────────────────
+def save_internal_message(data: dict) -> int:
+    from .models import InternalMessage
+    with get_session() as s:
+        row = InternalMessage(**{k: v for k, v in data.items() if k != "id"})
+        s.add(row)
+        s.flush()
+        return row.id
+
+def list_internal_messages(launch_id: int, limit: int = 50) -> list:
+    from .models import InternalMessage
+    with get_session() as s:
+        rows = (s.query(InternalMessage)
+                .filter(InternalMessage.launch_id == launch_id)
+                .order_by(InternalMessage.created_at.desc())
+                .limit(limit).all())
+        return [
+            {c.name: getattr(r, c.name) for c in r.__table__.columns}
+            for r in rows
+        ]
+
+def migrate_files_messages():
+    """幂等建表 + 补列"""
+    from .db import engine, get_session
+    from .models import UploadedFile, InternalMessage, Base
+    UploadedFile.__table__.create(engine, checkfirst=True)
+    InternalMessage.__table__.create(engine, checkfirst=True)
+    # 给旧表补 launch_id / gate_num 列（幂等）
+    new_cols = [("launch_id", "INTEGER DEFAULT 0"), ("gate_num", "INTEGER DEFAULT 0")]
+    with engine.connect() as conn:
+        for col, typedef in new_cols:
+            try:
+                conn.execute(f"ALTER TABLE uploaded_files ADD COLUMN {col} {typedef}")
+            except Exception:
+                pass
+        try:
+            conn.execute("ALTER TABLE internal_messages ADD COLUMN launch_id INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
+
+# ── 交付物与标准 ──────────────────────────────────────────────────────────────
+def save_deliverable(data: dict) -> int:
+    from .models import LaunchDeliverable
+    with get_session() as s:
+        row = LaunchDeliverable(**{k: v for k, v in data.items() if k != "id"})
+        s.add(row)
+        s.flush()
+        return row.id
+
+def list_deliverables(launch_id: int, gate_num: int = None) -> list:
+    from .models import LaunchDeliverable
+    with get_session() as s:
+        q = s.query(LaunchDeliverable).filter(LaunchDeliverable.launch_id == launch_id)
+        if gate_num is not None:
+            q = q.filter(LaunchDeliverable.gate_num == gate_num)
+        rows = q.order_by(LaunchDeliverable.gate_num, LaunchDeliverable.id).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+def update_deliverable(deliv_id: int, data: dict):
+    from .models import LaunchDeliverable
+    with get_session() as s:
+        row = s.query(LaunchDeliverable).get(deliv_id)
+        if row:
+            for k, v in data.items():
+                setattr(row, k, v)
+
+def delete_deliverable(deliv_id: int):
+    from .models import LaunchDeliverable
+    with get_session() as s:
+        row = s.query(LaunchDeliverable).get(deliv_id)
+        if row:
+            s.delete(row)
+
+def migrate_deliverables():
+    from .db import engine
+    from .models import LaunchDeliverable, Base
+    LaunchDeliverable.__table__.create(engine, checkfirst=True)
+
+
+# ── CourseAssessment ──────────────────────────────────────────────────
+
+def save_course_assessment(data: dict) -> int:
+    from .models import CourseAssessment
+    with get_session() as s:
+        row = CourseAssessment(**{k: v for k, v in data.items() if hasattr(CourseAssessment, k)})
+        s.add(row)
+        s.flush()
+        return row.id
+
+def list_course_assessments(school: str = None, major_category: str = None,
+                             assessment_type: str = None, days_ahead: int = None,
+                             limit: int = 200) -> list:
+    from .models import CourseAssessment
+    from datetime import date, timedelta
+    with get_session() as s:
+        q = s.query(CourseAssessment)
+        if school:
+            q = q.filter(CourseAssessment.school == school)
+        if major_category:
+            q = q.filter(CourseAssessment.major_category == major_category)
+        if assessment_type:
+            q = q.filter(CourseAssessment.assessment_type == assessment_type)
+        if days_ahead is not None:
+            today = date.today().isoformat()
+            future = (date.today() + timedelta(days=days_ahead)).isoformat()
+            q = q.filter(CourseAssessment.due_date >= today,
+                         CourseAssessment.due_date <= future)
+        q = q.order_by(CourseAssessment.due_date)
+        rows = q.limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+def delete_course_assessments(school: str, subject_code: str = None, source: str = None):
+    from .models import CourseAssessment
+    from sqlalchemy import delete as sa_delete
+    with get_session() as s:
+        q = sa_delete(CourseAssessment).where(CourseAssessment.school == school)
+        if subject_code:
+            q = q.where(CourseAssessment.subject_code == subject_code)
+        if source:
+            q = q.where(CourseAssessment.source == source)
+        s.execute(q)
+
+def migrate_course_assessments():
+    from .db import engine
+    from .models import CourseAssessment, Base
+    CourseAssessment.__table__.create(engine, checkfirst=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 3：需求预测三层体系 CRUD
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── SchoolAcademicCalendar (第一层) ──────────────────────────────────
+
+def save_school_academic_calendar(data: dict) -> int:
+    from .models import SchoolAcademicCalendar
+    with get_session() as s:
+        row = SchoolAcademicCalendar(**{k: v for k, v in data.items() if hasattr(SchoolAcademicCalendar, k)})
+        s.add(row)
+        s.flush()
+        return row.id
+
+def list_school_academic_calendars(school: str = None, country: str = None,
+                                    semester: str = None, limit: int = 500) -> list:
+    from .models import SchoolAcademicCalendar
+    with get_session() as s:
+        q = s.query(SchoolAcademicCalendar)
+        if school:   q = q.filter(SchoolAcademicCalendar.school == school)
+        if country:  q = q.filter(SchoolAcademicCalendar.country == country)
+        if semester: q = q.filter(SchoolAcademicCalendar.semester == semester)
+        rows = q.order_by(SchoolAcademicCalendar.school, SchoolAcademicCalendar.semester).limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+def upsert_school_academic_calendar(data: dict) -> int:
+    """按 school+semester+academic_year 更新或插入。"""
+    from .models import SchoolAcademicCalendar
+    with get_session() as s:
+        row = s.query(SchoolAcademicCalendar).filter_by(
+            school=data.get("school"),
+            semester=data.get("semester"),
+            academic_year=data.get("academic_year", "2025-2026"),
+        ).first()
+        if row:
+            for k, v in data.items():
+                if hasattr(row, k): setattr(row, k, v)
+            return row.id
+        else:
+            row = SchoolAcademicCalendar(**{k: v for k, v in data.items() if hasattr(SchoolAcademicCalendar, k)})
+            s.add(row)
+            s.flush()
+            return row.id
+
+
+# ── CourseAssessmentV2 (第二层) ───────────────────────────────────────
+
+def save_course_assessment_v2(data: dict) -> int:
+    from .models import CourseAssessmentV2
+    with get_session() as s:
+        row = CourseAssessmentV2(**{k: v for k, v in data.items() if hasattr(CourseAssessmentV2, k)})
+        s.add(row)
+        s.flush()
+        return row.id
+
+def list_course_assessments_v2(school: str = None, major_category: str = None,
+                                 assessment_type: str = None, days_ahead: int = None,
+                                 limit: int = 500) -> list:
+    from .models import CourseAssessmentV2
+    from datetime import date, timedelta
+    with get_session() as s:
+        q = s.query(CourseAssessmentV2)
+        if school:           q = q.filter(CourseAssessmentV2.school == school)
+        if major_category:   q = q.filter(CourseAssessmentV2.major_category == major_category)
+        if assessment_type:  q = q.filter(CourseAssessmentV2.assessment_type == assessment_type)
+        if days_ahead is not None:
+            today  = date.today().isoformat()
+            future = (date.today() + timedelta(days=days_ahead)).isoformat()
+            q = q.filter(CourseAssessmentV2.due_date_if_public >= today,
+                         CourseAssessmentV2.due_date_if_public <= future)
+        rows = q.order_by(CourseAssessmentV2.due_date_if_public).limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+def delete_course_assessments_v2(school: str, subject_code: str = None, source_type: str = None):
+    from .models import CourseAssessmentV2
+    from sqlalchemy import delete as sa_delete
+    with get_session() as s:
+        q = sa_delete(CourseAssessmentV2).where(CourseAssessmentV2.school == school)
+        if subject_code: q = q.where(CourseAssessmentV2.subject_code == subject_code)
+        if source_type:  q = q.where(CourseAssessmentV2.source_type == source_type)
+        s.execute(q)
+
+
+# ── MajorDemandProfile (第三层) ──────────────────────────────────────
+
+def save_major_demand_profile(data: dict) -> int:
+    from .models import MajorDemandProfile
+    with get_session() as s:
+        row = s.query(MajorDemandProfile).filter_by(
+            school=data.get("school"),
+            major_category=data.get("major_category"),
+            product_type=data.get("product_type"),
+        ).first()
+        if row:
+            for k, v in data.items():
+                if hasattr(row, k): setattr(row, k, v)
+            return row.id
+        else:
+            row = MajorDemandProfile(**{k: v for k, v in data.items() if hasattr(MajorDemandProfile, k)})
+            s.add(row)
+            s.flush()
+            return row.id
+
+def list_major_demand_profiles(school: str = None, major_category: str = None,
+                                product_type: str = None, limit: int = 500) -> list:
+    from .models import MajorDemandProfile
+    with get_session() as s:
+        q = s.query(MajorDemandProfile)
+        if school:          q = q.filter(MajorDemandProfile.school == school)
+        if major_category:  q = q.filter(MajorDemandProfile.major_category == major_category)
+        if product_type:    q = q.filter(MajorDemandProfile.product_type == product_type)
+        rows = q.order_by(MajorDemandProfile.total_orders.desc()).limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+
+# ── DemandForecastSignal ──────────────────────────────────────────────
+
+def save_demand_forecast_signal(data: dict) -> int:
+    from .models import DemandForecastSignal
+    from services.guardrails import validate_product
+    product_check = validate_product(data.get("product"))
+    if not product_check["valid"]:
+        return 0
+    data["product"] = product_check["canonical_product_id"]
+    with get_session() as s:
+        row = DemandForecastSignal(**{k: v for k, v in data.items() if hasattr(DemandForecastSignal, k)})
+        s.add(row)
+        s.flush()
+        return row.id
+
+def list_demand_forecast_signals(school: str = None, product: str = None,
+                                  time_window: int = None, min_confidence: float = 0.0,
+                                  limit: int = 100) -> list:
+    from .models import DemandForecastSignal
+    from datetime import date
+    with get_session() as s:
+        q = s.query(DemandForecastSignal)
+        if school:      q = q.filter(DemandForecastSignal.school == school)
+        if product:     q = q.filter(DemandForecastSignal.product == product)
+        if time_window: q = q.filter(DemandForecastSignal.time_window_days == time_window)
+        if min_confidence > 0:
+            q = q.filter(DemandForecastSignal.confidence_score >= min_confidence)
+        today = date.today().isoformat()
+        q = q.filter(DemandForecastSignal.expires_at >= today)
+        rows = q.order_by(DemandForecastSignal.signal_strength.desc()).limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+def clear_expired_forecast_signals():
+    from .models import DemandForecastSignal
+    from sqlalchemy import delete as sa_delete
+    from datetime import date
+    with get_session() as s:
+        today = date.today().isoformat()
+        s.execute(sa_delete(DemandForecastSignal).where(DemandForecastSignal.expires_at < today))
+
+
+# ── DataSourceRegistry ────────────────────────────────────────────────
+
+def upsert_data_source(data: dict) -> int:
+    from .models import DataSourceRegistry
+    from datetime import datetime as _dt
+    with get_session() as s:
+        row = s.query(DataSourceRegistry).filter_by(source_name=data.get("source_name")).first()
+        if row:
+            for k, v in data.items():
+                if hasattr(row, k): setattr(row, k, v)
+            row.updated_at = _dt.utcnow()
+            return row.id
+        else:
+            row = DataSourceRegistry(**{k: v for k, v in data.items() if hasattr(DataSourceRegistry, k)})
+            s.add(row)
+            s.flush()
+            return row.id
+
+def list_data_sources(source_type: str = None, school: str = None, limit: int = 200) -> list:
+    from .models import DataSourceRegistry
+    with get_session() as s:
+        q = s.query(DataSourceRegistry)
+        if source_type: q = q.filter(DataSourceRegistry.source_type == source_type)
+        if school:      q = q.filter(DataSourceRegistry.school == school)
+        rows = q.order_by(DataSourceRegistry.school, DataSourceRegistry.source_type).limit(limit).all()
+        return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+
+
+def migrate_demand_tables():
+    """幂等创建需求预测相关新表"""
+    from .db import engine
+    from .models import (SchoolAcademicCalendar, CourseAssessmentV2,
+                         MajorDemandProfile, DemandForecastSignal, DataSourceRegistry)
+    for model in [SchoolAcademicCalendar, CourseAssessmentV2, MajorDemandProfile,
+                  DemandForecastSignal, DataSourceRegistry]:
+        model.__table__.create(engine, checkfirst=True)

@@ -806,6 +806,10 @@ def main():
     elif cmd == "init-demo":
         """一键演示初始化：导入样本数据→生成月度计划→生成任务→分析市场→推送企业微信"""
         import subprocess
+        if os.getenv("ALLOW_DEMO_DATA") != "1":
+            print("演示数据入口已关闭：正式系统禁止默认导入 sample/demo 数据。")
+            print("如仅用于本地演示，请显式设置 ALLOW_DEMO_DATA=1 后再运行。")
+            return
         env = os.environ.copy()
 
         def run_step(step_name, step_cmd):
@@ -1068,6 +1072,431 @@ def main():
         result = WeeklyGrowthWorkflow(config, week_start=week_start).run()
         print(f"✅ {result.get('summary','完成')}")
 
+    elif cmd == "run-weekly-growth-brief":
+        dry_run  = "--dry-run" in args
+        use_llm  = True if "--use-llm" in args else (False if "--no-llm" in args else None)
+        # 默认：dry-run → no-llm；live → use-llm
+        if use_llm is None:
+            use_llm = not dry_run
+        if dry_run:
+            mode_label = f"DRY-RUN · {'允许LLM' if use_llm else '零LLM'} · 不推送企微"
+        else:
+            mode_label = "LIVE（含LLM · 将存库 · 将推送）"
+        print(f"\n🗺️  本周增长作战单 [{mode_label}]")
+        print("=" * 60)
+
+        from agents.weekly_growth_brief_agent import WeeklyGrowthBriefAgent
+        brief = WeeklyGrowthBriefAgent().run(dry_run=dry_run, use_llm=use_llm)
+
+        # ── ① 5个时间窗口 ─────────────────────────────────────
+        print("\n【① 时间窗口预测】")
+        for w, info in brief['time_windows'].items():
+            top_p = info.get("top_products", [])
+            top_name = top_p[0].get("product", "") if top_p else ""
+            print(f"  [{w}] 紧迫度={info.get('urgency','?'):<4} "
+                  f"预估线索={info.get('total_leads',0):>3}条"
+                  + (f"  主推：{top_name}" if top_name else ""))
+
+        # ── ② 渠道内容建议 ────────────────────────────────────
+        print(f"\n【② 渠道内容建议（{len(brief['channel_strategy'])}条）】")
+        CH_CN = {"xiaohongshu":"小红书","vertical_account":"垂直号",
+                 "moments":"朋友圈","community":"社群",
+                 "referral":"转介绍","old_customer":"老客户"}
+        for ch in brief['channel_strategy']:
+            ch_name = CH_CN.get(ch.get("channel",""), ch.get("channel",""))
+            print(f"  [{ch.get('priority','P2')}] {ch_name:<6} {ch.get('hook_idea','')[:50]}")
+            print(f"       依据：{ch.get('reason','')[:60]}")
+
+        # ── ③ 顾问建议 ────────────────────────────────────────
+        print(f"\n【③ 顾问建议（{len(brief['consultant_suggestions'])}条）】")
+        for s in brief['consultant_suggestions']:
+            action = str(s.get('action', ''))
+            print(f"  [P{s.get('priority','')}] {action}")
+            if s.get('next_questions'):
+                print(f"       补问：{s['next_questions'][0]}")
+            if s.get('not_recommended'):
+                print(f"       不推荐：{'、'.join(s['not_recommended'])}")
+            print(f"       目标：{s.get('success_metric','')}")
+            print(f"       依据：{s.get('data_evidence','')}")
+
+        # ── ④ 学管建议 ────────────────────────────────────────
+        print("\n【④ 学管建议】")
+        xs = brief.get('xueguan_suggestions', {})
+        print(f"  核心：{xs.get('week_focus','')}")
+        for act in xs.get("coordinator_actions", []):
+            print(f"  · {act}")
+        print(f"  风险：{xs.get('delivery_risks','')}")
+
+        # ── ⑤ 产品红绿灯（按本周需求排序）────────────────────
+        print("\n【⑤ 产品红绿灯（按本周需求相关度排序）】")
+
+        # 从 matched_needs 建立 产品→需求 上下文映射
+        _product_need_ctx: dict = {}
+        for _match in brief.get('matched_needs', []):
+            for _rec in _match.get('recommended_products', []):
+                _pid = _rec['product_id']
+                if _pid not in _product_need_ctx:
+                    _product_need_ctx[_pid] = {
+                        'need_label':   _match['label'],
+                        'heat':         _match['heat_score'],
+                        'orders':       _match['order_count'],
+                        'action_level': _match.get('action_level', 'hold'),
+                        'push_level':   _rec.get('push_level', 'unknown'),
+                    }
+
+        _ACTION_STR = {
+            'push_now':     '→ 本周主推',
+            'push_cautious':'→ 谨慎推，先问学管',
+            'hold':         '→ 暂无需求，不主动推',
+        }
+        _STATUS_ICON = {'green': '🟢', 'yellow': '🟡', 'red': '🔴', 'grey': '⚫'}
+
+        # 排序：有需求信号的排前（按热度），无信号的排后
+        def _tl_sort(item):
+            _pid, _ = item
+            _ctx = _product_need_ctx.get(_pid)
+            return (-(_ctx['heat'] if _ctx else 0), _pid)
+
+        for pid, tl in sorted(brief['product_traffic_lights'].items(), key=_tl_sort):
+            ctx    = _product_need_ctx.get(pid)
+            icon   = _STATUS_ICON.get(tl.get('status', ''), '⚫')
+            pname  = tl.get('product_name', pid)
+            reason = tl.get('status_reason', '')
+            cap    = tl.get('teacher_capacity', '')
+            print(f"\n  {icon} {pname}")
+            print(f"     红绿灯：{reason}")
+            if cap and cap != '数据不足':
+                print(f"     容量：{cap}")
+            if ctx and ctx['heat'] > 0:
+                action_str = _ACTION_STR.get(ctx['action_level'], '')
+                print(f"     本周需求：{ctx['need_label']}（近30天{ctx['orders']}单，热度{ctx['heat']}%）{action_str}")
+            else:
+                print(f"     本周需求：暂无明确信号 → 不主动推，维持常规")
+
+        # ── ⑥ 数据依据 ───────────────────────────────────────
+        print("\n【⑥ 数据依据】")
+        snap = brief.get("wechat_push_preview", "")
+        db_snap = brief.get("missing_data_report", {})
+        print(f"  orders总量：{db_snap.get('order_count_total', '?')}条")
+        print(f"  近30天成单：{db_snap.get('order_count_30d', '?')}单")
+        print(f"  leads总量：{db_snap.get('lead_count', '?')}条")
+        print(f"  teacher_capacity：{db_snap.get('teacher_capacity', '?')}条")
+        print(f"  school_calendar：{db_snap.get('school_calendar', '?')}条")
+
+        # ── ⑦ 缺失数据清单 ───────────────────────────────────
+        print("\n【⑦ 缺失数据清单】")
+        mdr = brief.get("missing_data_report", {})
+        missing = mdr.get("missing", [])
+        warnings_list = mdr.get("warnings", [])
+        if missing:
+            for m in missing:
+                print(f"  {m}")
+        if warnings_list:
+            for w in warnings_list:
+                print(f"  {w}")
+        if not missing and not warnings_list:
+            print("  ✅ 数据完整，无缺失")
+        print(f"  数据充分度：{'✅ 充分' if mdr.get('is_data_sufficient') else '❌ 不足，建议补录后再发布'}")
+
+        # ── ⑧ 可信度 ─────────────────────────────────────────
+        print(f"\n【⑧ 可信度】{brief['confidence'].upper()}"
+              f"  |  AI来源：{brief['ai_source']}"
+              f"  |  风险等级：{brief['overall_risk'].upper()}")
+
+        # ── ⑨ 内容校准记录 ───────────────────────────────────
+        print("\n【⑨ 内容校准（RiskGuard禁用词）】")
+        fb = brief.get("risk_alerts", [])
+        calibration = [a for a in fb if a.get("rule_id", "").startswith("R12")]
+        if calibration:
+            for a in calibration:
+                print(f"  {a.get('blocked_content','')} → {a.get('suggested_fix','')}")
+        else:
+            print("  ✅ 未触发禁用词")
+
+        # ── ⑩ RiskGuard 检查结果 ──────────────────────────────
+        print(f"\n【⑩ RiskGuard告警（{len(brief['risk_alerts'])}条）】")
+        sev_map = {"critical":"🚨","high":"🔴","medium":"🟡","low":"⚪"}
+        for a in sorted(brief['risk_alerts'],
+                        key=lambda x: {"critical":0,"high":1,"medium":2,"low":3}.get(x.get("severity","low"),3)):
+            sev = a.get("severity","low")
+            print(f"  {sev_map.get(sev,'')} [{sev.upper()}] {a.get('rule_name','')}")
+            print(f"       → {a.get('suggested_fix','')[:60]}")
+        if not brief['risk_alerts']:
+            print("  ✅ 无告警")
+
+        print("\n" + "=" * 60)
+        if dry_run:
+            print("✅ [DRY-RUN完成] 以上内容未发送企业微信，未写入数据库")
+            print("   验证通过后运行（不加--dry-run）正式发布")
+        else:
+            print(f"✅ [LIVE完成] brief_id={brief.get('brief_id')}  已存库")
+
+    elif cmd == "diagnose-orders-date":
+        # ══════════════════════════════════════════════════════════
+        # orders 日期诊断：不修改数据，只读
+        # ══════════════════════════════════════════════════════════
+        import sqlite3 as _sqlite3
+        from datetime import datetime as _dt, timedelta as _td
+        _db_path = os.environ.get("DATABASE_URL", "sqlite:///data/marketing.db")
+        _db_path = _db_path.replace("sqlite:///", "").replace("sqlite://", "")
+        if not os.path.isabs(_db_path):
+            _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _db_path)
+
+        print(f"\n🔍 【orders 日期诊断】数据库：{_db_path}")
+        print("=" * 65)
+
+        _conn = _sqlite3.connect(_db_path)
+        _cur  = _conn.cursor()
+
+        # 1. 总数
+        _total = _cur.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+        print(f"\n① orders 总数：{_total} 条")
+
+        # 2. order_date 非空/空
+        _nonempty = _cur.execute(
+            "SELECT COUNT(*) FROM orders WHERE order_date IS NOT NULL AND order_date != ''"
+        ).fetchone()[0]
+        _empty = _total - _nonempty
+        print(f"② order_date 非空：{_nonempty} 条 / 为空：{_empty} 条")
+
+        # 3. 字段类型（SQLite TYPEOF）
+        _sample_type = _cur.execute(
+            "SELECT TYPEOF(order_date) FROM orders WHERE order_date IS NOT NULL LIMIT 1"
+        ).fetchone()
+        print(f"③ order_date 字段类型（SQLite TYPEOF）：{_sample_type[0] if _sample_type else '无数据'}")
+
+        # 4. 最新10条原始值
+        _latest10 = _cur.execute(
+            "SELECT order_date FROM orders WHERE order_date IS NOT NULL ORDER BY order_date DESC LIMIT 10"
+        ).fetchall()
+        print(f"\n④ 最新10条 order_date 原始值：")
+        for row in _latest10:
+            print(f"   {row[0]!r}")
+
+        # 5. min / max
+        _minmax = _cur.execute(
+            "SELECT MIN(order_date), MAX(order_date) FROM orders WHERE order_date IS NOT NULL"
+        ).fetchone()
+        print(f"\n⑤ min(order_date)：{_minmax[0]}")
+        print(f"   max(order_date)：{_minmax[1]}")
+
+        # 6. 当前时间基准
+        _now_utc   = _dt.utcnow()
+        _now_local = _dt.now()
+        print(f"\n⑥ 当前时间基准")
+        print(f"   datetime.utcnow()  = {_now_utc.isoformat()}")
+        print(f"   datetime.now()     = {_now_local.isoformat()}")
+        print(f"   UTC偏移（本地-UTC）= {(_now_local - _now_utc).total_seconds()/3600:.1f} 小时")
+
+        # 7. 近期订单数（分别用 UTC 和本地时间查）
+        print(f"\n⑦ 近期订单数（SQL直接比较字符串）：")
+        for _days in [7, 30, 60, 90, 180, 365]:
+            _cutoff_utc   = (_now_utc   - _td(days=_days)).strftime("%Y-%m-%d %H:%M:%S")
+            _cutoff_local = (_now_local - _td(days=_days)).strftime("%Y-%m-%d %H:%M:%S")
+            _cnt_utc   = _cur.execute(
+                "SELECT COUNT(*) FROM orders WHERE order_date >= ?", (_cutoff_utc,)
+            ).fetchone()[0]
+            _cnt_local = _cur.execute(
+                "SELECT COUNT(*) FROM orders WHERE order_date >= ?", (_cutoff_local,)
+            ).fetchone()[0]
+            print(f"   近{_days:>3}天 | UTC截止={_cutoff_utc[:10]} → {_cnt_utc}条 "
+                  f"| 本地截止={_cutoff_local[:10]} → {_cnt_local}条")
+
+        # 8. 样本分析（是否有 date-only 格式）
+        _date_only = _cur.execute(
+            "SELECT COUNT(*) FROM orders WHERE order_date IS NOT NULL AND LENGTH(order_date) = 10"
+        ).fetchone()[0]
+        _datetime_full = _cur.execute(
+            "SELECT COUNT(*) FROM orders WHERE order_date IS NOT NULL AND LENGTH(order_date) > 10"
+        ).fetchone()[0]
+        print(f"\n⑧ 格式分析：")
+        print(f"   纯日期格式(YYYY-MM-DD, 长度=10)：{_date_only} 条")
+        print(f"   含时间格式(长度>10)：{_datetime_full} 条")
+
+        # 9. 是否存在 created_at
+        _has_created = _cur.execute(
+            "SELECT COUNT(*) FROM orders WHERE created_at IS NOT NULL"
+        ).fetchone()[0]
+        _created_max = _cur.execute("SELECT MAX(created_at) FROM orders").fetchone()[0]
+        print(f"\n⑨ created_at 非空：{_has_created}条  最新值：{_created_max}")
+
+        # 10. 综合判断
+        print(f"\n⑩ 综合判断：")
+        _max_date_str = _minmax[1] or ""
+        if not _minmax[1]:
+            print("   ❌ order_date 全部为空，无法分析")
+        else:
+            # 尝试解析 max 日期
+            _parsed_max = None
+            for _fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d"):
+                try:
+                    _parsed_max = _dt.strptime(_max_date_str[:19], _fmt[:len(_max_date_str[:19])])
+                    break
+                except Exception:
+                    pass
+            if _parsed_max:
+                _days_since_max = (_now_local - _parsed_max).days
+                print(f"   最新订单距今：{_days_since_max} 天（{_max_date_str}）")
+                if _days_since_max > 30:
+                    print(f"   ⚠️  最新订单已超过30天 → 近30天真实为0，不是时区问题")
+                    print(f"   ⚠️  需确认：CRM同步是否已停止？最近一次同步时间？")
+                else:
+                    print(f"   ✅ 最新订单在30天内 → 查询逻辑可能存在时区/格式问题")
+                    if _date_only > 0 and _datetime_full == 0:
+                        print(f"   🔍 所有 order_date 为纯日期格式（YYYY-MM-DD）")
+                        print(f"   🔍 当前查询使用 datetime 字符串比较，可能因格式不匹配导致0结果")
+                        print(f"   → 修复建议：查询时用 DATE(order_date) >= ? 而非全量字符串比较")
+            else:
+                print(f"   ⚠️  无法解析 max(order_date) = {_max_date_str!r}")
+
+        _conn.close()
+        print("\n" + "=" * 65)
+        print("诊断完成，未修改任何数据。")
+
+    elif cmd == "diagnose-teacher-capacity":
+        # ══════════════════════════════════════════════════════════
+        # teacher_capacity 产品匹配诊断：不修改数据，只读
+        # ══════════════════════════════════════════════════════════
+        import sqlite3 as _sqlite3
+        _db_path = os.environ.get("DATABASE_URL", "sqlite:///data/marketing.db")
+        _db_path = _db_path.replace("sqlite:///", "").replace("sqlite://", "")
+        if not os.path.isabs(_db_path):
+            _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _db_path)
+
+        print(f"\n🔍 【teacher_capacity 产品匹配诊断】")
+        print("=" * 65)
+
+        _conn = _sqlite3.connect(_db_path)
+        _cur  = _conn.cursor()
+
+        # 1. 总数
+        _total = _cur.execute("SELECT COUNT(*) FROM teacher_capacity").fetchone()[0]
+        print(f"\n① teacher_capacity 总数：{_total} 条")
+
+        # 2. 原始 product_name 列表（去重，含数量）
+        _raw_products = _cur.execute(
+            "SELECT product_name, COUNT(*) as cnt FROM teacher_capacity "
+            "GROUP BY product_name ORDER BY cnt DESC"
+        ).fetchall()
+        print(f"\n② 原始 product_name（{len(_raw_products)}种）：")
+        for _pn, _cnt in _raw_products:
+            print(f"   {_cnt:>3}条  |  {_pn!r}")
+
+        # 3. subject_area / teacher_name / capacity 字段样本
+        _cols = [d[1] for d in _cur.execute("PRAGMA table_info(teacher_capacity)").fetchall()]
+        print(f"\n③ teacher_capacity 表字段：{_cols}")
+        _samples = _cur.execute(
+            "SELECT * FROM teacher_capacity LIMIT 5"
+        ).fetchall()
+        print(f"\n④ 前5条样本数据：")
+        for row in _samples:
+            print(f"   {dict(zip(_cols, row))}")
+
+        _conn.close()
+
+        # 4. 系统核心产品列表（ProductTrafficLight 中的定义）
+        _CORE_PRODUCTS = [
+            ("final_prediction",  "Final考前冲刺规划"),
+            ("regular",           "课业辅导"),
+            ("dissertation",      "毕业论文辅导"),
+            ("guaranteed",        "保过辅导"),
+            ("annual_package",    "学年包"),
+            ("dp_premium",        "DP旗舰版"),
+        ]
+        _PRODUCT_SUBJECT_MAP = {
+            "final_prediction":  ["final_exam", "exam_prep", "final"],
+            "regular":           ["regular", "coursework", "general"],
+            "dissertation":      ["dissertation", "thesis"],
+            "guaranteed":        ["guaranteed", "pass_guarantee"],
+            "annual_package":    ["annual", "package"],
+            "dp_premium":        ["dp", "diploma"],
+        }
+        print(f"\n⑤ 系统核心产品（ProductTrafficLight 定义）：")
+        for _pid, _pname in _CORE_PRODUCTS:
+            _keywords = _PRODUCT_SUBJECT_MAP.get(_pid, [])
+            print(f"   {_pid:<20} {_pname}  匹配关键词：{_keywords}")
+
+        # 5. 逐条匹配分析
+        print(f"\n⑥ 原始 product_name vs 核心产品匹配结果：")
+        _unmatched = []
+        _matched   = []
+        for _pn, _cnt in _raw_products:
+            _pn_lower = (_pn or "").lower()
+            _hit = None
+            for _pid, _pname in _CORE_PRODUCTS:
+                _kws = _PRODUCT_SUBJECT_MAP.get(_pid, [])
+                if any(_kw in _pn_lower for _kw in _kws):
+                    _hit = (_pid, _pname)
+                    break
+            if _hit:
+                _matched.append((_pn, _cnt, _hit))
+                print(f"   ✅ {_pn!r:30} ({_cnt}条) → {_hit[0]}")
+            else:
+                _unmatched.append((_pn, _cnt))
+                print(f"   ❌ {_pn!r:30} ({_cnt}条) → 无法匹配")
+
+        print(f"\n⑦ 汇总：匹配成功 {len(_matched)} 种，无法匹配 {len(_unmatched)} 种")
+
+        # 6. 为什么核心产品是灰
+        print(f"\n⑧ 核心产品为何是灰（逐个分析）：")
+        _matched_pids = {h[0] for _, _, h in _matched}
+        for _pid, _pname in _CORE_PRODUCTS:
+            if _pid in _matched_pids:
+                print(f"   🟡 {_pname}：有匹配的老师资源（但需确认 capacity > 0）")
+            else:
+                _kws = _PRODUCT_SUBJECT_MAP.get(_pid, [])
+                print(f"   ⚫ {_pname}：无匹配 —— 当前原始字段不含关键词 {_kws}")
+
+        # 7. 建议映射表
+        print(f"\n⑨ 建议产品映射表（基于原始数据推断，需人工确认）：")
+        print(f"   {'原始 product_name':<35} → 建议映射到")
+        _SUGGEST_MAP = {
+            "dissertation": "dissertation",
+            "essay": "regular",
+            "assignment": "regular",
+            "exam": "final_prediction",
+            "final": "final_prediction",
+            "coursework": "regular",
+            "tutoring": "regular",
+            "包课": "annual_package",
+            "年包": "annual_package",
+            "保分": "guaranteed",
+            "dp": "dp_premium",
+            "report": "regular",
+        }
+        _conn2 = _sqlite3.connect(_db_path)
+        _cur2  = _conn2.cursor()
+        _raw2  = _cur2.execute(
+            "SELECT DISTINCT product_name FROM teacher_capacity WHERE product_name IS NOT NULL"
+        ).fetchall()
+        _conn2.close()
+        for (_pn,) in _raw2:
+            _pn_lower = (_pn or "").lower()
+            _suggestion = next(
+                (v for k, v in _SUGGEST_MAP.items() if k in _pn_lower), "❓ 需人工确认"
+            )
+            print(f"   {_pn!r:<35} → {_suggestion}")
+
+        # 同时诊断 orders 里的产品分布
+        _conn3 = _sqlite3.connect(_db_path)
+        _cur3  = _conn3.cursor()
+        _order_products = _cur3.execute(
+            "SELECT product, COUNT(*) as cnt FROM orders "
+            "WHERE product IS NOT NULL AND product != '' "
+            "GROUP BY product ORDER BY cnt DESC LIMIT 20"
+        ).fetchall()
+        _conn3.close()
+        print(f"\n⑩ orders 表中 product 字段分布（Top20）：")
+        for _pn, _cnt in _order_products:
+            _pn_lower = (_pn or "").lower()
+            _suggestion = next(
+                (v for k, v in _SUGGEST_MAP.items() if k in _pn_lower), "❓"
+            )
+            print(f"   {_cnt:>5}条  |  {_pn!r:<30} → 建议：{_suggestion}")
+
+        print("\n" + "=" * 65)
+        print("诊断完成，未修改任何数据。")
+
     elif cmd == "run-attribution":
         days_lb = 90
         for a in args:
@@ -1162,10 +1591,297 @@ def main():
         print("  结论：" + ("✅ 系统基本正常，可以启动" if ok else "⚠️  存在需要处理的问题，请检查上方 ⚠️/❌ 项"))
         print()
 
+    elif cmd == "test-llm":
+        _cmd_test_llm(args)
+
+    elif cmd == "diagnose-product-catalog":
+        _cmd_diagnose_product_catalog()
+
+    elif cmd == "diagnose-student-needs":
+        _cmd_diagnose_student_needs()
+
+    elif cmd == "test-traffic-light":
+        _cmd_test_traffic_light()
+
     else:
         print(f"未知命令：{cmd}")
         print(__doc__)
         sys.exit(1)
+
+
+def _cmd_test_llm(args: list):
+    """python main.py test-llm [--provider claude|deepseek|qwen|rule]"""
+    from services.llm import LLMRouter
+    from services.llm.anthropic_provider import AnthropicProvider
+    from services.llm.openai_compatible_provider import OpenAICompatibleProvider
+    from services.llm.rule_fallback_provider import RuleFallbackProvider
+
+    target = None
+    for a in args:
+        if a.startswith("--provider="):
+            target = a.split("=", 1)[1]
+        elif a == "--provider" and args.index(a) + 1 < len(args):
+            target = args[args.index(a) + 1]
+
+    print("\n" + "=" * 52)
+    print("  LLM Health Check")
+    print("=" * 52)
+
+    providers = {
+        "claude":        AnthropicProvider(),
+        "deepseek":      OpenAICompatibleProvider("deepseek"),
+        "qwen":          OpenAICompatibleProvider("qwen"),
+        "rule_fallback": RuleFallbackProvider(),
+    }
+
+    check_list = [target] if target else list(providers.keys())
+    results = {}
+    for name in check_list:
+        p = providers.get(name)
+        if not p:
+            print(f"\n  {name}: unknown provider")
+            continue
+        print(f"\n  {name}:")
+        r = p.health_check()
+        status = r.get("status", "?")
+        avail  = r.get("available", False)
+        print(f"    status:    {status}")
+        if r.get("error"):
+            print(f"    error:     {r['error'][:80]}")
+        if r.get("model"):
+            print(f"    model:     {r['model']}")
+        print(f"    available: {'✅ true' if avail else '❌ false'}")
+        results[name] = r
+
+    print("\n" + "-" * 52)
+    router = LLMRouter()
+    active = next(
+        (n for n in router._order if results.get(n, {}).get("available")),
+        "rule_fallback"
+    )
+    print(f"  Router order:   {router._order}")
+    print(f"  Active provider: ✅ {active}")
+    print("=" * 52 + "\n")
+
+
+def _cmd_diagnose_student_needs():
+    """python main.py diagnose-student-needs — 诊断学生需求识别结果"""
+    print("\n" + "=" * 65)
+    print("  学生需求识别诊断（StudentNeedEngine）")
+    print("=" * 65)
+
+    try:
+        from services.student_need_engine import StudentNeedEngine
+        result = StudentNeedEngine().run(days=30)
+    except Exception as e:
+        print(f"\n❌ StudentNeedEngine 运行失败: {e}")
+        import traceback; traceback.print_exc()
+        return
+
+    print(f"\n数据范围：近30天  总订单：{result['total_orders']}条  总线索：{result['total_leads']}条\n")
+    print(f"{'需求类型':<28} {'订单':>5} {'线索':>5} {'热度':>6}  {'执行建议'}")
+    print("-" * 65)
+
+    for m in result["need_summary"]:
+        heat_bar = "█" * (m["heat_score"] // 10) + "░" * (10 - m["heat_score"] // 10)
+        print(f"{m['label']:<28} {m['order_count']:>5} {m['lead_count']:>5} "
+              f"{m['heat_score']:>5}%  {heat_bar}")
+
+    active = [m for m in result["need_summary"] if m["heat_score"] > 0]
+    print(f"\n✅ 有热度的需求类型：{len(active)} 个")
+
+    if active:
+        print("\n--- 推荐产品映射 ---")
+        for m in active[:4]:
+            recs     = "、".join(m["recommended_products"])
+            not_recs = "、".join(m["not_recommended"].keys())
+            print(f"  {m['label']}：推 [{recs}]  |  不推 [{not_recs}]")
+
+    unmapped = result.get("unmapped_orders", [])
+    if unmapped:
+        unmapped_cnt = sum(c for _, c in unmapped)
+        print(f"\n⚠️  未映射 CRM 产品名：{len(unmapped)} 种，共 {unmapped_cnt} 条订单")
+        for name, cnt in unmapped[:8]:
+            print(f"     {name!r:25s} {cnt}条")
+        if len(unmapped) > 8:
+            print(f"     ... 共 {len(unmapped)} 种")
+        print("\n   → 建议将这些名称加入 services/student_need_engine.py 的 crm_keywords")
+
+    print("\n" + "=" * 65 + "\n")
+
+
+def _cmd_diagnose_product_catalog():
+    """
+    python main.py diagnose-product-catalog
+    诊断产品目录库加载状态及 CRM 数据映射情况。
+    """
+    import sqlite3 as _sql
+    print("\n" + "=" * 65)
+    print("  产品目录库诊断")
+    print("=" * 65)
+
+    # ── 1. 产品目录库基本信息 ──────────────────────────────────────
+    try:
+        from services.product_catalog_service import ProductCatalogService
+        products = ProductCatalogService.load_active_products()
+        catalog_ok = True
+    except Exception as e:
+        print(f"\n❌ 产品目录库加载失败: {e}")
+        catalog_ok = False
+        products = []
+
+    if not catalog_ok:
+        print("\n未找到产品目录库，请提供产品目录文件或知识库路径。")
+        return
+
+    categories = set(p["product_category"] for p in products)
+    all_aliases = sum(len(p["aliases"]) for p in products)
+    alias_map   = ProductCatalogService.get_alias_map()
+
+    print(f"\n① 产品目录库状态：✅ 已找到")
+    print(f"   来源：knowledge_base/product_catalog.py → PRODUCT_CATALOG")
+    print(f"   active 产品数量：{len(products)}")
+    print(f"   产品类别数量：{len(categories)}  ({', '.join(sorted(categories))})")
+    print(f"   aliases 总数量：{all_aliases}（含名称、别名）")
+    print(f"\n   产品列表：")
+    for p in products:
+        print(f"     {p['canonical_product_id']:20s}  {p['product_name']}  "
+              f"[{p['product_category']}]  aliases={len(p['aliases'])}")
+
+    # ── 2. ProductTrafficLight 硬编码检查 ────────────────────────
+    import ast, pathlib
+    tl_file = pathlib.Path(__file__).parent / "agents" / "product_traffic_light.py"
+    hardcoded = False
+    if tl_file.exists():
+        src = tl_file.read_text()
+        for marker in ["PRODUCTS = [", "CORE_PRODUCTS", "\"final_prediction\"",
+                        "\"annual_package\"", "\"dp_premium\"", "\"guaranteed\""]:
+            # 允许出现在注释里，只检查赋值语句
+            if f"{marker}" in src and "ProductCatalogService" not in src:
+                hardcoded = True
+                break
+    print(f"\n② ProductTrafficLight 硬编码检查：{'❌ 仍有硬编码' if hardcoded else '✅ 已使用产品目录库'}")
+
+    # ── 3. orders 产品映射 ────────────────────────────────────────
+    _db_path = os.environ.get("DATABASE_URL", "sqlite:///data/marketing.db")
+    _db_path = _db_path.replace("sqlite:///", "").replace("sqlite://", "")
+    if not os.path.isabs(_db_path):
+        _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _db_path)
+
+    try:
+        conn = _sql.connect(_db_path)
+        raw_orders = conn.execute(
+            "SELECT product, COUNT(*) FROM orders WHERE product IS NOT NULL AND product != '' "
+            "GROUP BY product ORDER BY COUNT(*) DESC"
+        ).fetchall()
+        raw_leads = conn.execute(
+            "SELECT product_interest, COUNT(*) FROM leads "
+            "WHERE product_interest IS NOT NULL AND product_interest != '' "
+            "GROUP BY product_interest ORDER BY COUNT(*) DESC"
+        ).fetchall()
+        raw_cap = conn.execute(
+            "SELECT subject_area, COUNT(*) FROM teacher_capacity "
+            "GROUP BY subject_area ORDER BY COUNT(*) DESC"
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"\n❌ 数据库读取失败: {e}")
+        return
+
+    def _check_mapping(raw_list, label):
+        mapped, unmapped = [], []
+        for raw, cnt in raw_list:
+            result = ProductCatalogService.map_raw_product(raw)
+            if result["canonical_product_id"]:
+                mapped.append((raw, cnt, result["canonical_product_id"], result["confidence"]))
+            else:
+                unmapped.append((raw, cnt))
+        total_mapped   = sum(c for _, c, _, _ in mapped)
+        total_unmapped = sum(c for _, c in unmapped)
+        total = total_mapped + total_unmapped
+        print(f"\n{label}（共 {total} 条记录，{len(raw_list)} 种原始名）：")
+        print(f"   ✅ 已映射：{len(mapped)} 种原始名，{total_mapped} 条记录")
+        for raw, cnt, pid, conf in mapped[:8]:
+            print(f"      {raw!r:25s} → {pid:20s}  ({cnt}条, {conf})")
+        if len(mapped) > 8:
+            print(f"      ... 共 {len(mapped)} 种")
+        if unmapped:
+            print(f"   ❌ 未映射（unmapped_products）：{len(unmapped)} 种原始名，{total_unmapped} 条记录")
+            for raw, cnt in unmapped[:5]:
+                print(f"      {raw!r:25s}  ({cnt}条) ← 需补充 alias")
+            if len(unmapped) > 5:
+                print(f"      ... 共 {len(unmapped)} 种")
+        else:
+            print(f"   ✅ 无未映射记录")
+
+    _check_mapping(raw_orders, "③ orders.product 映射")
+    _check_mapping(raw_leads,  "④ leads.product_interest 映射")
+
+    # teacher_capacity 用 subject_area 匹配
+    cap_mapped, cap_unmapped = [], []
+    kw_map = {}
+    for p in products:
+        for kw in p.get("capacity_subject_keywords", []):
+            kw_map[kw] = p["canonical_product_id"]
+    for sa, cnt in raw_cap:
+        low = str(sa).lower()
+        matched = next((pid for kw, pid in kw_map.items() if kw in low), None)
+        if matched:
+            cap_mapped.append((sa, cnt, matched))
+        else:
+            cap_unmapped.append((sa, cnt))
+    print(f"\n⑤ teacher_capacity.subject_area 映射（共 {len(raw_cap)} 种）：")
+    print(f"   ✅ 已映射：{len(cap_mapped)} 种")
+    for sa, cnt, pid in cap_mapped:
+        print(f"      {str(sa):25s} → {pid}")
+    if cap_unmapped:
+        print(f"   ❌ 未映射：{len(cap_unmapped)} 种")
+        for sa, cnt in cap_unmapped:
+            print(f"      {str(sa):25s}  ({cnt}条)")
+    else:
+        print(f"   ✅ 无未映射记录")
+
+    print("\n" + "=" * 65)
+    print("  诊断完成，未修改任何数据。")
+    print("=" * 65 + "\n")
+
+
+def _cmd_test_traffic_light():
+    """python main.py test-traffic-light — 单独跑红绿灯，输出每个产品详情。"""
+    print("\n" + "=" * 65)
+    print("  ProductTrafficLight 测试")
+    print("=" * 65)
+
+    try:
+        from agents.product_traffic_light import ProductTrafficLight
+        tl = ProductTrafficLight()
+        result = tl.run()
+    except RuntimeError as e:
+        print(f"\n❌ {e}")
+        return
+    except Exception as e:
+        print(f"\n❌ 运行失败: {e}")
+        import traceback; traceback.print_exc()
+        return
+
+    print(f"\n共评估 {len(result)} 个产品（来源：产品目录库）\n")
+    for pid, info in result.items():
+        icon = {"green": "🟢", "yellow": "🟡", "red": "🔴", "grey": "⚫"}.get(info["status"], "?")
+        print(f"  {icon}  [{pid}] {info['product_name']}")
+        print(f"       状态：{info['status_reason']}")
+        print(f"       需求：{info['demand_trend']}（近7天={info['demand_7d']}单，前7天={info['demand_prev_7d']}单）")
+        print(f"       容量：{info['teacher_capacity']}")
+        print(f"       顾问：{info['consultant_note'][:60]}...")
+        print(f"       学管：{info['xueguan_note'][:60]}...")
+        print(f"       推广渠道：{', '.join(info['recommended_channels']) or '无'}")
+        if info["missing_data"]:
+            print(f"       缺失：{' / '.join(info['missing_data'])}")
+        if info["forbidden_claims"]:
+            print(f"       禁用：{', '.join(info['forbidden_claims'][:3])}")
+        print(f"       来源：{info.get('catalog_source', '?')}")
+        print()
+
+    print("=" * 65 + "\n")
 
 
 if __name__ == "__main__":

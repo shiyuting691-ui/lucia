@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 
-import anthropic
+from services.llm import LLMRouter
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from database import (
@@ -141,8 +141,7 @@ EXTRACTION_PROMPT = """\
 class FactExtractionAgent:
     def __init__(self, config: dict = None):
         self.config = config or {}
-        self.client = anthropic.Anthropic()
-        self.model = self.config.get("anthropic", {}).get("model", "claude-opus-4-7")
+        self._router = LLMRouter()
 
     def extract(self, file_path: str, category: str = None) -> dict:
         """
@@ -184,13 +183,12 @@ class FactExtractionAgent:
 
         raw_json = ""
         try:
-            # 不使用 thinking，避免消耗 token 导致 JSON 被截断
-            resp = self.client.messages.create(
-                model=self.model,
-                max_tokens=8000,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw_json = resp.content[0].text
+            resp = self._router.chat(prompt, max_tokens=8000, task_type="fact_extraction")
+            if resp.success:
+                raw_json = resp.text or ""
+            else:
+                logger.error(f"[FactExtractionAgent] LLM error: {resp.error}")
+                return {"facts_saved": 0, "terms_saved": 0, "missing": [], "error": resp.error}
         except Exception as e:
             logger.error(f"[FactExtractionAgent] API error: {e}")
             return {"facts_saved": 0, "terms_saved": 0, "missing": [], "error": str(e)}

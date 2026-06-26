@@ -13,7 +13,7 @@ from .models import Base, Product, School
 
 # ── 数据库 URL ──
 _BASE_DIR = Path(__file__).parent.parent
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_BASE_DIR}/marketing.db")
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_BASE_DIR}/data/marketing.db")
 
 # SQLite 需要设置 check_same_thread=False
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
